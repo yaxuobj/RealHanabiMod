@@ -1,0 +1,17 @@
+{
+  "block.realhanabimod.hanabi_launcher": "花火打ち上げ機",
+  "item.realhanabimod.hanabi_launcher": "花火打ち上げ機",
+
+  "gui.realhanabimod.list.title": "花火タイムライン",
+  "gui.realhanabimod.edit.title": "花火を編集",
+  "gui.realhanabimod.add": "追加",
+  "gui.realhanabimod.start": "開始",
+  "gui.realhanabimod.delete": "削除",
+  "gui.realhanabimod.duplicate": "複製",
+  "gui.realhanabimod.save": "保存",
+  "gui.realhanabimod.cancel": "保存せずに戻る",
+  "gui.realhanabimod.gradient.toggle": "グラデーション切替",
+
+  "subtitle.realhanabimod.fly": "花火が打ち上がる",
+  "subtitle.realhanabimod.explode": "花火が爆発する"
+}

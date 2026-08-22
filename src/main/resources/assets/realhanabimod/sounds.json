@@ -1,0 +1,14 @@
+{
+  "fly": {
+    "subtitle": "subtitle.realhanabimod.fly",
+    "sounds": [
+      { "name": "realhanabimod:fly", "stream": false }
+    ]
+  },
+  "explode": {
+    "subtitle": "subtitle.realhanabimod.explode",
+    "sounds": [
+      { "name": "realhanabimod:explode", "stream": false }
+    ]
+  }
+}

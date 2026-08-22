@@ -1,0 +1,17 @@
+{
+  "block.realhanabimod.hanabi_launcher": "Hanabi Launcher",
+  "item.realhanabimod.hanabi_launcher": "Hanabi Launcher",
+
+  "gui.realhanabimod.list.title": "Hanabi Timeline",
+  "gui.realhanabimod.edit.title": "Edit Firework",
+  "gui.realhanabimod.add": "Add",
+  "gui.realhanabimod.start": "Start",
+  "gui.realhanabimod.delete": "Delete",
+  "gui.realhanabimod.duplicate": "Duplicate",
+  "gui.realhanabimod.save": "Save",
+  "gui.realhanabimod.cancel": "Back without saving",
+  "gui.realhanabimod.gradient.toggle": "Toggle gradient",
+
+  "subtitle.realhanabimod.fly": "Firework launches",
+  "subtitle.realhanabimod.explode": "Firework explodes"
+}
