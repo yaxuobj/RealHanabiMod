@@ -84,8 +84,14 @@ public class FireworkShowPlayer {
             FireworkVisual v = visIt.next();
             FireworkVisual.Phase before = v.phase;
             v.tick(dt);
-            if (before == FireworkVisual.Phase.FUSE && v.phase == FireworkVisual.Phase.EXPLODED) {
+            if (before == FireworkVisual.Phase.FUSE && v.phase == FireworkVisual.Phase.EXPLODED
+                    && !v.entry.misfire) {
+                // 不発の場合は爆発音を鳴らさない（玉が静かに消えるだけ）
                 queueSound(ModSounds.EXPLODE.get(), v.apexPos, SOUND_DELAY_SECONDS);
+            }
+            // 柳の爆発から少し経った頃（火花が垂れ始めた頃）に「ザラザラ…」というクラックル音を1回だけ鳴らす。
+            if (v.pollCrackleTrigger()) {
+                queueSound(ModSounds.CRACKLE.get(), v.getSparkCentroid(), SOUND_DELAY_SECONDS);
             }
             updateVisibilityCache(v);
             if (v.removed) visIt.remove();

@@ -15,6 +15,7 @@ import java.util.List;
  * height      : 打ち上がる高さ（ブロックからの相対Y）
  * offsetX/Z   : ブロックからのXZ位置ズレ
  * colors      : 色。1つなら単色、2つ以上ならグラデーション。
+ * misfire     : 不発フラグ。trueの場合、玉は打ち上がるが頂点で爆発せず、火花も音も出さずにそのまま消える。
  */
 public class FireworkEntry extends TimelineItem {
 
@@ -25,6 +26,7 @@ public class FireworkEntry extends TimelineItem {
     public float offsetX = 0.0f;
     public float offsetZ = 0.0f;
     public List<Integer> colors = new ArrayList<>(List.of(0)); // ColorPresetsのインデックス列
+    public boolean misfire = false; // 不発（玉だけ打ち上がり、爆発しない）
 
     @Override
     public int type() {
@@ -45,6 +47,7 @@ public class FireworkEntry extends TimelineItem {
         ListTag colorList = new ListTag();
         for (int c : colors) colorList.add(IntTag.valueOf(c));
         tag.put("Colors", colorList);
+        tag.putBoolean("Misfire", misfire);
         return tag;
     }
 
@@ -63,6 +66,7 @@ public class FireworkEntry extends TimelineItem {
             colors.add(((IntTag) colorList.get(i)).getAsInt());
         }
         if (colors.isEmpty()) colors.add(0);
+        misfire = tag.getBoolean("Misfire");
     }
 
     @Override
@@ -77,6 +81,7 @@ public class FireworkEntry extends TimelineItem {
         buf.writeFloat(offsetZ);
         buf.writeVarInt(colors.size());
         for (int c : colors) buf.writeVarInt(c);
+        buf.writeBoolean(misfire);
     }
 
     @Override
@@ -90,6 +95,7 @@ public class FireworkEntry extends TimelineItem {
         int n = buf.readVarInt();
         colors.clear();
         for (int i = 0; i < n; i++) colors.add(buf.readVarInt());
+        misfire = buf.readBoolean();
     }
 
     public FireworkEntry copy() {
@@ -102,6 +108,7 @@ public class FireworkEntry extends TimelineItem {
         e.offsetX = offsetX;
         e.offsetZ = offsetZ;
         e.colors = new ArrayList<>(colors);
+        e.misfire = misfire;
         return e;
     }
 }

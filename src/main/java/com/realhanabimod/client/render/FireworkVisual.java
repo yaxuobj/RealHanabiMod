@@ -39,6 +39,12 @@ public class FireworkVisual {
     public static final float WILLOW_MAX_LIFE = 6.5f;
     private static final float SAFETY_MAX_EXPLODE_TIME = WILLOW_MAX_LIFE + 1.0f;
 
+    // 柳（willow）の終盤、火花が消える少し手前で「ザラザラ…」というクラックル音を1回だけ鳴らすためのタイミング。
+    // 実際に音が鳴るのは、ここから更に SOUND_DELAY_SECONDS(1秒) 遅れて聞こえる(光→音の順にしているため)。
+    // なので爆発から約3秒後に聞こえるよう、ここでは爆発から2秒経過した時点をトリガーにしている。
+    public static final float WILLOW_CRACKLE_TRIGGER_TIME = 2.0f;
+    private boolean crackleQueued = false;
+
     public List<SparkParticle> sparks = new ArrayList<>();
 
     // サウンド管理用フラグ（1秒遅延で再生するため、いつ音を鳴らすべきかをタイマーで管理）
@@ -113,6 +119,37 @@ public class FireworkVisual {
         return phase == Phase.ASCENDING ? getCurrentBallPos() : apexPos;
     }
 
+    /**
+     * 柳の火花群が今どのあたりまで垂れ落ちているかの代表座標（現在残っている火花の重心）。
+     * クラックル音を鳴らす位置に使う。火花が既に無ければ頂点(apexPos)を代わりに返す。
+     */
+    public Vec3 getSparkCentroid() {
+        if (sparks.isEmpty()) return apexPos;
+        double sx = 0, sy = 0, sz = 0;
+        for (SparkParticle sp : sparks) {
+            sx += sp.pos.x;
+            sy += sp.pos.y;
+            sz += sp.pos.z;
+        }
+        int n = sparks.size();
+        return new Vec3(sx / n, sy / n, sz / n);
+    }
+
+    /**
+     * 柳の爆発から一定時間経った（＝火花が垂れ始めた頃）タイミングに来ていれば
+     * クラックル音を鳴らすべきとして true を1回だけ返す。
+     * 呼び出し側（FireworkShowPlayer）は毎tickこれをポーリングし、trueが返ってきたらその場でサウンドをキューする。
+     * 一度trueを返したら内部フラグで消費済みにするため、以後同じ花火では二度と鳴らない。
+     */
+    public boolean pollCrackleTrigger() {
+        if (crackleQueued) return false;
+        if (phase != Phase.EXPLODED) return false;
+        if (!FireworkShapeManager.isWillow(entry.designIndex)) return false;
+        if (explodeTimer < WILLOW_CRACKLE_TRIGGER_TIME) return false;
+        crackleQueued = true;
+        return true;
+    }
+
     public void tick(float deltaSeconds) {
         if (phase == Phase.ASCENDING) {
             ascendTimer += deltaSeconds;
@@ -143,6 +180,14 @@ public class FireworkVisual {
 
     private void explode() {
         phase = Phase.EXPLODED;
+
+        // 不発：玉は頂点まで打ち上がるが、そこで爆発せず火花も発生させない。
+        // sparks は空のままにしておくと、tick() 側の「火花が0個なら終了」処理により
+        // そのまま静かに消える（＝爆発音も出ない）。
+        if (entry.misfire) {
+            return;
+        }
+
         List<FireworkShapeManager.Spark> pattern =
                 FireworkShapeManager.generate(entry.designIndex, entry.uid);
 

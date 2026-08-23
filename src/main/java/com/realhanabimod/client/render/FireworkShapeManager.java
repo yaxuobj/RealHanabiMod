@@ -18,6 +18,8 @@ public class FireworkShapeManager {
             "菊", "牡丹", "柳", "輪", "ハート", "星", "クロセット", "パーム"
     };
 
+    private static final int WILLOW_INDEX = 2;
+
     public static int designCount() {
         return DESIGN_NAMES.length;
     }
@@ -25,6 +27,12 @@ public class FireworkShapeManager {
     public static String designName(int index) {
         int i = ((index % DESIGN_NAMES.length) + DESIGN_NAMES.length) % DESIGN_NAMES.length;
         return DESIGN_NAMES[i];
+    }
+
+    /** 柳（willow）デザインかどうか。終盤のクラックル音（ザラザラ）を鳴らす対象の判定に使う。 */
+    public static boolean isWillow(int designIndex) {
+        int idx = ((designIndex % DESIGN_NAMES.length) + DESIGN_NAMES.length) % DESIGN_NAMES.length;
+        return idx == WILLOW_INDEX;
     }
 
     private static final Random RANDOM = new Random();

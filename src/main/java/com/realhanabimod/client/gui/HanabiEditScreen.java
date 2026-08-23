@@ -24,9 +24,10 @@ public class HanabiEditScreen extends Screen {
 
     private Button gradientToggleButton;
     private Button secondaryColorLeftButton, secondaryColorRightButton;
+    private Button misfireToggleButton;
 
     private static final int PANEL_MARGIN = 24;
-    private static final int NUM_ROWS = 7; // デザイン/大きさ/高さ/爆発時間/オフセット/色/グラデーション
+    private static final int NUM_ROWS = 8; // デザイン/大きさ/高さ/爆発時間/オフセット/色/グラデーション/不発
     private static final int BOTTOM_RESERVED = 40; // 保存・戻るボタン用に確保する下部の高さ
     private static final int LABEL_W = 110; // ラベルを入力ボックスの左に置くための固定幅
 
@@ -143,6 +144,13 @@ public class HanabiEditScreen extends Screen {
 
         updateGradientButtonsVisibility();
 
+        // 7. 不発（玉だけ打ち上げて、頂点で爆発させない設定）
+        misfireToggleButton = Button.builder(misfireLabel(), b -> {
+            entry.misfire = !entry.misfire;
+            misfireToggleButton.setMessage(misfireLabel());
+        }).bounds(fieldX, rowY(7), 150, 18).build();
+        addRenderableWidget(misfireToggleButton);
+
         // 保存 / 保存せずに戻る
         addRenderableWidget(Button.builder(Component.translatable("gui.realhanabimod.save"), b -> onSave())
                 .bounds(width - 170, height - 34, 75, 20).build());
@@ -152,6 +160,12 @@ public class HanabiEditScreen extends Screen {
 
     private int rowY(int index) {
         return optY + rowH * index;
+    }
+
+    private Component misfireLabel() {
+        return Component.translatable(entry.misfire
+                ? "gui.realhanabimod.misfire.on"
+                : "gui.realhanabimod.misfire.off");
     }
 
     private void updateGradientButtonsVisibility() {
@@ -203,6 +217,7 @@ public class HanabiEditScreen extends Screen {
             drawLabel(gfx, "高さ", rowY(2));
             drawLabel(gfx, "爆発まで(秒)", rowY(3));
             drawLabel(gfx, "X / Z", rowY(4));
+            drawLabel(gfx, "不発", rowY(7));
 
             // メインの色スウォッチ（矢印のすぐ間、狭い間隔）＋色名
             int colorIdx = entry.colors.get(0);

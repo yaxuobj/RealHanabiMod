@@ -11,7 +11,10 @@
   "gui.realhanabimod.save": "Save",
   "gui.realhanabimod.cancel": "Back without saving",
   "gui.realhanabimod.gradient.toggle": "Toggle gradient",
+  "gui.realhanabimod.misfire.on": "Misfire: ON (ball only)",
+  "gui.realhanabimod.misfire.off": "Misfire: OFF",
 
   "subtitle.realhanabimod.fly": "Firework launches",
-  "subtitle.realhanabimod.explode": "Firework explodes"
+  "subtitle.realhanabimod.explode": "Firework explodes",
+  "subtitle.realhanabimod.crackle": "Firework crackles"
 }

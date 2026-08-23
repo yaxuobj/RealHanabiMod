@@ -11,7 +11,10 @@
   "gui.realhanabimod.save": "保存",
   "gui.realhanabimod.cancel": "保存せずに戻る",
   "gui.realhanabimod.gradient.toggle": "グラデーション切替",
+  "gui.realhanabimod.misfire.on": "不発：ON（玉のみ）",
+  "gui.realhanabimod.misfire.off": "不発：OFF",
 
   "subtitle.realhanabimod.fly": "花火が打ち上がる",
-  "subtitle.realhanabimod.explode": "花火が爆発する"
+  "subtitle.realhanabimod.explode": "花火が爆発する",
+  "subtitle.realhanabimod.crackle": "花火がザラザラと鳴る"
 }

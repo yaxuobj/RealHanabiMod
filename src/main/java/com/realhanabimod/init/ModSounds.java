@@ -19,4 +19,8 @@ public class ModSounds {
     // 爆発音（explode.ogg）。一度だけ再生。
     public static final RegistryObject<SoundEvent> EXPLODE = REGISTRY.register("explode",
             () -> SoundEvent.createVariableRangeEvent(new ResourceLocation(RealHanabiMod.MOD_ID, "explode")));
+
+    // 柳の終盤に鳴る「ザラザラ…」というクラックル音（crackle.ogg）。一度だけ再生。
+    public static final RegistryObject<SoundEvent> CRACKLE = REGISTRY.register("crackle",
+            () -> SoundEvent.createVariableRangeEvent(new ResourceLocation(RealHanabiMod.MOD_ID, "crackle")));
 }
