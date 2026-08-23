@@ -13,6 +13,8 @@
   "gui.realhanabimod.gradient.toggle": "Toggle gradient",
   "gui.realhanabimod.misfire.on": "Misfire: ON (ball only)",
   "gui.realhanabimod.misfire.off": "Misfire: OFF",
+  "gui.realhanabimod.curve.on": "Curve: ON",
+  "gui.realhanabimod.curve.off": "Curve: OFF",
 
   "subtitle.realhanabimod.fly": "Firework launches",
   "subtitle.realhanabimod.explode": "Firework explodes",

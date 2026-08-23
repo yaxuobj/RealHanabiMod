@@ -2,6 +2,7 @@ package com.realhanabimod.client.render;
 
 import com.realhanabimod.data.ColorPresets;
 import com.realhanabimod.data.FireworkEntry;
+import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Vector3f;
 
@@ -21,7 +22,9 @@ public class FireworkVisual {
 
     public final Vec3 originBlockPos;
     public final Vec3 launchPos;   // originBlockPos + offsetX/Z（打ち上げ開始地点、地上）
-    public final Vec3 apexPos;     // 爆発地点（launchPos + height）
+    public final Vec3 apexPos;     // 爆発地点。カーブ無効なら launchPos の真上(height)。カーブ有効なら
+    // launchPos から curveOffsetX/Z ぶんだけ横にずれた位置(+height)
+    // ＝曲がった先の頂点。
     public final FireworkEntry entry;
 
     public Phase phase = Phase.ASCENDING;
@@ -64,19 +67,51 @@ public class FireworkVisual {
         this.entry = entry;
         // 玉はブロックと完全に同じ座標（XZオフセット指定時のみズラす）から発射する
         this.launchPos = blockPos.add(entry.offsetX, 0.0, entry.offsetZ);
-        this.apexPos = launchPos.add(0, entry.height, 0);
+        // カーブ無効なら今まで通り真上(offsetX/Zと同じXZ)。カーブ有効なら、発射地点(offsetX/Z)から
+        // curveOffsetX/Z ぶんだけ離れた位置が爆発地点のXZになる＝玉はそちらへ向かって曲がりながら上昇していく。
+        double apexX = entry.curveEnabled ? entry.offsetX + entry.curveOffsetX : entry.offsetX;
+        double apexZ = entry.curveEnabled ? entry.offsetZ + entry.curveOffsetZ : entry.offsetZ;
+        this.apexPos = blockPos.add(apexX, entry.height, apexZ);
         // 毎回ぴったり1秒だと不自然なので 0.8〜1.2秒の範囲で花火ごとに固定の揺らぎを持たせる
         this.fuseDuration = 0.8f + (Math.abs(entry.uid) % 5) * 0.1f;
     }
 
-    public Vec3 getCurrentBallPos() {
-        double t = Math.min(1.0, ascendTimer / Math.max(0.05f, entry.explodeTime));
+    /**
+     * 打ち上げ開始からの経過秒数(0 〜 entry.explodeTime にクランプ)を指定して、その時点の玉の位置を返す。
+     * getCurrentBallPos()（＝現在時刻ぶん）だけでなく、尾・煙の「曲がったリボン」を描く際に過去の軌道を
+     * 何点かサンプリングする用途でも使う共通ロジック。ここを1箇所にまとめることで、玉の実際の軌道と
+     * 尾・煙の見た目が常にぴったり一致するようにしている。
+     */
+    public Vec3 getBallPosAtTime(float elapsedSeconds) {
+        double t = Mth.clamp(elapsedSeconds / Math.max(0.05f, entry.explodeTime), 0.0, 1.0);
         // 終盤ほど減速するが、完全に止まりはしないカーブ（線形と二次イーズアウトのブレンド）。
         // eased = t + DECEL*(t - t^2) なので t=1 では必ず apexPos に到達しつつ、
         // 終端速度が初速の (1 - DECEL) 倍だけ残る＝止まりきらずに減速したまま爆発を迎える。
         final double DECEL = 0.6;
-        double eased = t + DECEL * (t - t * t);
-        return launchPos.lerp(apexPos, eased);
+        double easedY = t + DECEL * (t - t * t);
+        double y = launchPos.y + (apexPos.y - launchPos.y) * easedY;
+
+        if (!entry.curveEnabled) {
+            // カーブ無効時は今まで通りXZ固定（真上に上昇するだけ）。
+            return new Vec3(launchPos.x, y, launchPos.z);
+        }
+
+        // カーブ有効時：水平方向(X/Z)は垂直方向とは別に、ease-in-out（序盤・終盤はゆっくり、
+        // 中間で最も速く曲がる）のイージングで補間する。急に曲がり始めたり急に止まったりせず、
+        // なめらかに発射地点からカーブ先へ移動していく見た目になる。
+        double horizT = easeInOutQuad(t);
+        double x = launchPos.x + (apexPos.x - launchPos.x) * horizT;
+        double z = launchPos.z + (apexPos.z - launchPos.z) * horizT;
+        return new Vec3(x, y, z);
+    }
+
+    /** 2次関数によるease-in-out。t=0とt=1では変化がゆっくり、t=0.5付近が最も速い。 */
+    private static double easeInOutQuad(double t) {
+        return t < 0.5 ? 2.0 * t * t : 1.0 - Math.pow(-2.0 * t + 2.0, 2) / 2.0;
+    }
+
+    public Vec3 getCurrentBallPos() {
+        return getBallPosAtTime(ascendTimer);
     }
 
     /**

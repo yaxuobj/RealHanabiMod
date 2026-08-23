@@ -16,6 +16,13 @@ import java.util.List;
  * offsetX/Z   : ブロックからのXZ位置ズレ
  * colors      : 色。1つなら単色、2つ以上ならグラデーション。
  * misfire     : 不発フラグ。trueの場合、玉は打ち上がるが頂点で爆発せず、火花も音も出さずにそのまま消える。
+ * curveEnabled: カーブ機能の有効/無効。trueの場合、玉は打ち上がりながら「発射地点(offsetX/Z)から
+ *               curveOffsetX/Z ぶんだけ離れた位置」へ曲がっていき、その曲がった先の頂点で爆発する。
+ *               misfireと組み合わせても良い（その場合はカーブした先で不発＝爆発せず消える）。
+ *               falseの場合は今まで通り、offsetX/Zの真上にまっすぐ打ち上がる。
+ *               カーブの曲がり方（イージング）は ease-in-out（序盤・終盤はゆっくり、中間で最も速く曲がる）。
+ * curveOffsetX/Z : カーブが有効な場合、発射地点(offsetX/Z)からの移動量（相対値）。例えば offsetX=5 で
+ *               curveOffsetX=3 なら、爆発地点のXは 5+3=8 になる。0のままなら該当軸は曲がらない。
  */
 public class FireworkEntry extends TimelineItem {
 
@@ -27,6 +34,9 @@ public class FireworkEntry extends TimelineItem {
     public float offsetZ = 0.0f;
     public List<Integer> colors = new ArrayList<>(List.of(0)); // ColorPresetsのインデックス列
     public boolean misfire = false; // 不発（玉だけ打ち上がり、爆発しない）
+    public boolean curveEnabled = false; // カーブ（発射地点から横にずれた位置で爆発させる）
+    public float curveOffsetX = 0.0f; // カーブの移動量（発射地点からの相対X）
+    public float curveOffsetZ = 0.0f; // カーブの移動量（発射地点からの相対Z）
 
     @Override
     public int type() {
@@ -48,6 +58,9 @@ public class FireworkEntry extends TimelineItem {
         for (int c : colors) colorList.add(IntTag.valueOf(c));
         tag.put("Colors", colorList);
         tag.putBoolean("Misfire", misfire);
+        tag.putBoolean("CurveEnabled", curveEnabled);
+        tag.putFloat("CurveX", curveOffsetX);
+        tag.putFloat("CurveZ", curveOffsetZ);
         return tag;
     }
 
@@ -67,6 +80,11 @@ public class FireworkEntry extends TimelineItem {
         }
         if (colors.isEmpty()) colors.add(0);
         misfire = tag.getBoolean("Misfire");
+        curveEnabled = tag.getBoolean("CurveEnabled");
+        // 既存セーブ(カーブ機能がなかった頃)には CurveX/Z が存在しないので、その場合は
+        // offsetX/Z(打ち上げ位置)と同じにしておく＝真上に打ち上がる従来通りの見た目になる。
+        curveOffsetX = tag.contains("CurveX") ? tag.getFloat("CurveX") : offsetX;
+        curveOffsetZ = tag.contains("CurveZ") ? tag.getFloat("CurveZ") : offsetZ;
     }
 
     @Override
@@ -82,6 +100,9 @@ public class FireworkEntry extends TimelineItem {
         buf.writeVarInt(colors.size());
         for (int c : colors) buf.writeVarInt(c);
         buf.writeBoolean(misfire);
+        buf.writeBoolean(curveEnabled);
+        buf.writeFloat(curveOffsetX);
+        buf.writeFloat(curveOffsetZ);
     }
 
     @Override
@@ -96,6 +117,9 @@ public class FireworkEntry extends TimelineItem {
         colors.clear();
         for (int i = 0; i < n; i++) colors.add(buf.readVarInt());
         misfire = buf.readBoolean();
+        curveEnabled = buf.readBoolean();
+        curveOffsetX = buf.readFloat();
+        curveOffsetZ = buf.readFloat();
     }
 
     public FireworkEntry copy() {
@@ -109,6 +133,9 @@ public class FireworkEntry extends TimelineItem {
         e.offsetZ = offsetZ;
         e.colors = new ArrayList<>(colors);
         e.misfire = misfire;
+        e.curveEnabled = curveEnabled;
+        e.curveOffsetX = curveOffsetX;
+        e.curveOffsetZ = curveOffsetZ;
         return e;
     }
 }

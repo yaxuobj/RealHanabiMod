@@ -31,10 +31,14 @@ public class SmokeRenderer {
 
     // --- 上昇中の玉に付ける煙用 ---
     // 火花の「尾」と同じく、軽量化のため粒子ではなく1本のY方向に伸びたビルボード帯(quad)1枚だけで表現する。
-    private static final float ASCEND_SMOKE_WIDTH_BASE = 1.2f; // 玉の煙の帯の基本幅（entry.size倍率される）
+    private static final float ASCEND_SMOKE_WIDTH_BASE = 0.9f; // 玉の煙の帯の基本幅（entry.size倍率される）
     private static final float ASCEND_SMOKE_MAX_LEN = 40f;     // 高く打ち上げた場合に帯が伸びすぎないための上限
     private static final float ASCEND_SMOKE_MAX_ALPHA = 0.32f; // 煙は光る尾と違い控えめな不透明度に留める
     private static final int ASCEND_SMOKE_RGB = 0xE0E0E0;      // 爆発煙と同じ、柔らかい明るめのグレー
+
+    // --- カーブ花火の煙用（軌道に沿ったリボンで描く） ---
+    // 直線の花火は今まで通り1枚のquadだけで済むので軽量。カーブ花火だけ、この分割数でリボンをつなぐ。
+    private static final int ASCEND_SMOKE_SEGMENTS = 8;
 
     @SubscribeEvent
     public static void onRenderLevel(RenderLevelStageEvent event) {
@@ -99,7 +103,12 @@ public class SmokeRenderer {
             if (v == null || !v.cachedVisible) continue;
 
             if (v.phase == FireworkVisual.Phase.ASCENDING) {
-                drawAscendSmokeTrail(mc, buffer, matrix, trailRight, v);
+                if (v.entry.curveEnabled) {
+                    // カーブ花火は直線ではないので、専用の「軌道に沿ったリボン」描画に分岐する。
+                    drawAscendSmokeTrailCurve(mc, buffer, matrix, viewDir, v);
+                } else {
+                    drawAscendSmokeTrail(mc, buffer, matrix, trailRight, v);
+                }
                 continue;
             }
 
@@ -201,6 +210,80 @@ public class SmokeRenderer {
         buffer.vertex(matrix, tx + rx, by, tz + rz).color(r, g, b, alphaAtBase).uv(1, 1).uv2(lightmap).endVertex();
         buffer.vertex(matrix, tx + rx, ty, tz + rz).color(r, g, b, alphaAtBall).uv(1, 0).uv2(lightmap).endVertex();
         buffer.vertex(matrix, tx - rx, ty, tz - rz).color(r, g, b, alphaAtBall).uv(0, 0).uv2(lightmap).endVertex();
+    }
+
+    /**
+     * カーブする花火専用の、上昇中の煙の描画。直線の花火の煙(drawAscendSmokeTrail)は玉の直下に
+     * 真っすぐ伸びる1枚のquadだけで済むが、カーブ花火は玉自体が曲線を描いて動くため、それに沿って
+     * リボンを描かないと発射地点から浮いた/ズレた煙になってしまう。
+     * <p>
+     * HanabiRenderer.drawAscendTrailCurve と同じ考え方で、v.getBallPosAtTime(t) を複数時刻で
+     * サンプリングした点列を billboard リボンでつなぐ。発射地点側ほど濃く(古く溜まった煙)、
+     * 玉に近い側ほど薄く(発生したて)なるグラデーションは直線版と同じ。
+     */
+    private static void drawAscendSmokeTrailCurve(Minecraft mc, VertexConsumer buffer, Matrix4f matrix,
+                                                  Vector3f viewDir, FireworkVisual v) {
+        float tailScale = v.getTailScale();
+        if (tailScale <= 0.001f) return;
+
+        float endTime = v.ascendTimer;
+        // 尾(光)と同じ考え方で、上昇終盤は発射地点側から徐々に短くなって消える
+        float startTime = endTime * (1.0f - tailScale);
+        if (endTime - startTime < 1.0E-3f) return;
+
+        float halfWidth = ASCEND_SMOKE_WIDTH_BASE * v.entry.size;
+
+        int rgb = ASCEND_SMOKE_RGB;
+        float r = ((rgb >> 16) & 255) / 255F;
+        float g = ((rgb >> 8) & 255) / 255F;
+        float b = (rgb & 255) / 255F;
+
+        float alphaAtBall = ASCEND_SMOKE_MAX_ALPHA * 0.15f * tailScale;
+        float alphaAtBase = ASCEND_SMOKE_MAX_ALPHA * tailScale;
+
+        int segments = ASCEND_SMOKE_SEGMENTS;
+        Vec3[] points = new Vec3[segments + 1];
+        for (int i = 0; i <= segments; i++) {
+            float t = startTime + (endTime - startTime) * i / segments;
+            points[i] = v.getBallPosAtTime(t);
+        }
+
+        for (int seg = 0; seg < segments; seg++) {
+            Vec3 p0 = points[seg];
+            Vec3 p1 = points[seg + 1];
+            Vec3 diff = p1.subtract(p0);
+            double segLen = diff.length();
+            if (segLen < 1.0E-5) continue;
+
+            Vector3f dir = new Vector3f((float) (diff.x / segLen), (float) (diff.y / segLen), (float) (diff.z / segLen));
+
+            Vector3f right = new Vector3f();
+            dir.cross(viewDir, right);
+            if (right.lengthSquared() < 1.0E-6F) {
+                new Vector3f(0, 1, 0).cross(dir, right);
+                if (right.lengthSquared() < 1.0E-6F) right.set(1, 0, 0);
+            }
+            right.normalize();
+
+            float rx = right.x * halfWidth;
+            float ry = right.y * halfWidth;
+            float rz = right.z * halfWidth;
+
+            float x0 = (float) p0.x, y0 = (float) p0.y, z0 = (float) p0.z;
+            float x1 = (float) p1.x, y1 = (float) p1.y, z1 = (float) p1.z;
+
+            // seg=0(発射地点側、古い) ほど濃く、seg=segments(玉に近い、新しい) ほど薄くする
+            float a0 = alphaAtBase + (alphaAtBall - alphaAtBase) * (seg / (float) segments);
+            float a1 = alphaAtBase + (alphaAtBall - alphaAtBase) * ((seg + 1) / (float) segments);
+
+            int lightmap0 = LevelRenderer.getLightColor(mc.level, BlockPos.containing(x0, y0, z0));
+            int lightmap1 = LevelRenderer.getLightColor(mc.level, BlockPos.containing(x1, y1, z1));
+
+            buffer.vertex(matrix, x0 - rx, y0 - ry, z0 - rz).color(r, g, b, a0).uv(0, 1).uv2(lightmap0).endVertex();
+            buffer.vertex(matrix, x0 + rx, y0 + ry, z0 + rz).color(r, g, b, a0).uv(1, 1).uv2(lightmap0).endVertex();
+            buffer.vertex(matrix, x1 + rx, y1 + ry, z1 + rz).color(r, g, b, a1).uv(1, 0).uv2(lightmap1).endVertex();
+            buffer.vertex(matrix, x1 - rx, y1 - ry, z1 - rz).color(r, g, b, a1).uv(0, 0).uv2(lightmap1).endVertex();
+        }
     }
 
     private static void drawSmokeQuad(VertexConsumer buffer, Matrix4f matrix,

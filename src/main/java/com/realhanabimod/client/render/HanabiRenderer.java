@@ -33,6 +33,10 @@ public class HanabiRenderer {
     private static final float BALL_SIZE = 1.55f;
     private static final float TRAIL_WIDTH = 0.42f;
 
+    // --- カーブ花火の玉の「尾」用（軌道に沿ったリボンで描く） ---
+    // 直線の花火は今まで通り1枚のquadだけで済むので軽量。カーブ花火だけ、この分割数でリボンをつなぐ。
+    private static final int ASCEND_TRAIL_SEGMENTS = 8;
+
     // --- 柳(willow)など「尾」を持つ火花用 ---
     private static final float SPARK_TRAIL_WIDTH = 0.10f;
     // 曲がった尾を再現するために、実際の軌道(発生時の速度＋重力)を経過時間ぶん再計算して
@@ -151,12 +155,17 @@ public class HanabiRenderer {
 
                 // 尾の長さがあり、かつスケールが0じゃない時だけ尾を描画
                 if (currentTrailLen > 0.05f && tailScale > 0.001f) {
-                    drawTrailQuad(buffer, matrix, trailRight,
-                            ballPos.x, ballPos.y, ballPos.z,
-                            ballPos.y - currentTrailLen, // 縮んだ尾の一番下のY座標
-                            TRAIL_WIDTH,
-                            color,
-                            glow * tailScale); // 縮むと同時に透明度もスッと薄くする
+                    if (v.entry.curveEnabled) {
+                        // カーブ花火は直線ではないので、専用の「軌道に沿ったリボン」描画に分岐する。
+                        drawAscendTrailCurve(buffer, matrix, viewDir, v, color, glow, tailScale);
+                    } else {
+                        drawTrailQuad(buffer, matrix, trailRight,
+                                ballPos.x, ballPos.y, ballPos.z,
+                                ballPos.y - currentTrailLen, // 縮んだ尾の一番下のY座標
+                                TRAIL_WIDTH,
+                                color,
+                                glow * tailScale); // 縮むと同時に透明度もスッと薄くする
+                    }
                 }
 
                 // --- 玉（Ball）本体の描画 ---
@@ -327,6 +336,84 @@ public class HanabiRenderer {
                 .uv(0, 0)
                 .uv2(FULL_BRIGHT)
                 .endVertex();
+    }
+
+    /**
+     * カーブする花火専用の「尾」の描画。玉の尾(drawTrailQuad)は直線の花火では常に真上→真下の
+     * 固定直線1枚で済むが、カーブ花火は玉自体が曲線を描いて動くため、それに沿ってリボンを
+     * 描かないと発射地点から不自然に浮いた/ズレた尾になってしまう。
+     * <p>
+     * ここでは v.getBallPosAtTime(t) （玉の実際の軌道計算そのもの）を複数時刻でサンプリングし、
+     * 得られた点列を drawSparkTrailCurve と同じ考え方のbillboardリボンでつなぐ。こうすることで
+     * 「玉が今まさに通ってきた道のり」を毎フレーム正確に再構築でき、途中経過を保存しておく必要もない。
+     * 直線の花火はこの処理を通らないため、従来通り軽量な1枚のquadのままである。
+     */
+    private static void drawAscendTrailCurve(VertexConsumer buffer,
+                                             Matrix4f matrix,
+                                             Vector3f viewDir,
+                                             FireworkVisual v,
+                                             int rgb,
+                                             float glow,
+                                             float tailScale) {
+
+        float endTime = v.ascendTimer;
+        // getTailScale()と同じ「終盤ほど尾の付け根(発射地点側)から短くなっていく」見た目にするため、
+        // サンプリングする時間の開始点を tailScale に応じて現在時刻側へ寄せていく。
+        float startTime = endTime * (1.0f - tailScale);
+        if (endTime - startTime < 1.0E-3f) return;
+
+        float r = ((rgb >> 16) & 255) / 255F;
+        float g = ((rgb >> 8) & 255) / 255F;
+        float b = (rgb & 255) / 255F;
+
+        float halfWidth = TRAIL_WIDTH;
+        float topAlpha = 0.85F * glow;
+
+        int segments = ASCEND_TRAIL_SEGMENTS;
+        Vec3[] points = new Vec3[segments + 1];
+        for (int i = 0; i <= segments; i++) {
+            float t = startTime + (endTime - startTime) * i / segments;
+            points[i] = v.getBallPosAtTime(t);
+        }
+
+        for (int seg = 0; seg < segments; seg++) {
+            Vec3 p0 = points[seg];
+            Vec3 p1 = points[seg + 1];
+            Vec3 diff = p1.subtract(p0);
+            double segLen = diff.length();
+            if (segLen < 1.0E-5) continue;
+
+            Vector3f dir = new Vector3f((float) (diff.x / segLen), (float) (diff.y / segLen), (float) (diff.z / segLen));
+
+            Vector3f right = new Vector3f();
+            dir.cross(viewDir, right);
+            if (right.lengthSquared() < 1.0E-6F) {
+                new Vector3f(0, 1, 0).cross(dir, right);
+                if (right.lengthSquared() < 1.0E-6F) right.set(1, 0, 0);
+            }
+            right.normalize();
+
+            float rx = right.x * halfWidth;
+            float ry = right.y * halfWidth;
+            float rz = right.z * halfWidth;
+
+            float x0 = (float) p0.x, y0 = (float) p0.y, z0 = (float) p0.z;
+            float x1 = (float) p1.x, y1 = (float) p1.y, z1 = (float) p1.z;
+
+            // 発射地点側(seg=0)は透明→玉に近い側(seg=segments)ほど不透明、に線形補間する
+            // （直線版のdrawTrailQuadと同じ、下が透明・上が不透明というフェード方向）
+            float a0 = topAlpha * (seg / (float) segments);
+            float a1 = topAlpha * ((seg + 1) / (float) segments);
+
+            buffer.vertex(matrix, x0 - rx, y0 - ry, z0 - rz)
+                    .color(r, g, b, a0).uv(0, 1).uv2(FULL_BRIGHT).endVertex();
+            buffer.vertex(matrix, x0 + rx, y0 + ry, z0 + rz)
+                    .color(r, g, b, a0).uv(1, 1).uv2(FULL_BRIGHT).endVertex();
+            buffer.vertex(matrix, x1 + rx, y1 + ry, z1 + rz)
+                    .color(r, g, b, a1).uv(1, 0).uv2(FULL_BRIGHT).endVertex();
+            buffer.vertex(matrix, x1 - rx, y1 - ry, z1 - rz)
+                    .color(r, g, b, a1).uv(0, 0).uv2(FULL_BRIGHT).endVertex();
+        }
     }
 
     /**

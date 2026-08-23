@@ -21,13 +21,16 @@ public class HanabiEditScreen extends Screen {
     private FireworkEntry entry;
 
     private EditBox sizeBox, heightBox, explodeTimeBox, offsetXBox, offsetZBox;
+    private EditBox curveXBox, curveZBox;
 
     private Button gradientToggleButton;
     private Button secondaryColorLeftButton, secondaryColorRightButton;
     private Button misfireToggleButton;
+    private Button curveToggleButton;
+    private int secondarySwatchX; // グラデーション2色目のスウォッチ描画X座標（パネル幅に応じて可変）
 
     private static final int PANEL_MARGIN = 24;
-    private static final int NUM_ROWS = 8; // デザイン/大きさ/高さ/爆発時間/オフセット/色/グラデーション/不発
+    private static final int NUM_ROWS = 10; // デザイン/大きさ/高さ/爆発時間/オフセット/色/グラデーション/不発/カーブ/カーブ先XZ
     private static final int BOTTOM_RESERVED = 40; // 保存・戻るボタン用に確保する下部の高さ
     private static final int LABEL_W = 110; // ラベルを入力ボックスの左に置くための固定幅
 
@@ -53,14 +56,17 @@ public class HanabiEditScreen extends Screen {
         panelX = PANEL_MARGIN;
         panelY = PANEL_MARGIN;
         panelW = width - PANEL_MARGIN * 2;
-        panelH = height - PANEL_MARGIN * 2;
 
         optX = panelX + 24;
         int topGap = 30;
-        int available = Math.max(NUM_ROWS * 22, panelH - topGap - BOTTOM_RESERVED);
-        // ラベルを横に置くので、1行あたり必要な高さは箱の高さ(18)+わずかな余白でよい。
-        // それでも極端に画面が小さい場合に備えて 22〜32px の範囲でクランプする。
-        rowH = Mth.clamp(available / NUM_ROWS, 22, 32);
+        int maxContentH = height - PANEL_MARGIN * 2; // 画面に収まる最大の高さ
+        // 1行あたりの高さは、NUM_ROWS行がちゃんと画面の中に収まるように動的に決める。
+        // 画面/GUIスケールが小さい時は詰めて(最小16px)、大きい時は間延びしすぎないように(最大26px)クランプする。
+        // 以前は下限を22pxかつ「NUM_ROWS*22を必ず確保」する作りだったため、行数を増やした際に
+        // 画面の高さを無視してパネル外・ボタンの下にはみ出す不具合があった。
+        rowH = Mth.clamp((maxContentH - topGap - BOTTOM_RESERVED) / NUM_ROWS, 16, 26);
+        // パネルの高さは実際に必要な高さ(行数ぶん+上下の余白)に合わせて決める。画面の高さを超えないよう上限も設ける。
+        panelH = Math.min(maxContentH, topGap + rowH * NUM_ROWS + BOTTOM_RESERVED);
         optY = panelY + topGap;
 
         fieldX = optX + LABEL_W;
@@ -114,6 +120,7 @@ public class HanabiEditScreen extends Screen {
         }).bounds(fieldX + 40, rowY(5), 18, 18).build());
 
         // 6. グラデーション（専用行にして横はみ出しを防止）
+        int gradientBtnW = Math.min(130, fieldW);
         gradientToggleButton = Button.builder(Component.translatable("gui.realhanabimod.gradient.toggle"), b -> {
             if (entry.colors.size() > 1) {
                 entry.colors.remove(entry.colors.size() - 1);
@@ -121,16 +128,23 @@ public class HanabiEditScreen extends Screen {
                 entry.colors.add(entry.colors.get(0) + 1);
             }
             updateGradientButtonsVisibility();
-        }).bounds(fieldX, rowY(6), 130, 18).build();
+        }).bounds(fieldX, rowY(6), gradientBtnW, 18).build();
         addRenderableWidget(gradientToggleButton);
 
-        // グラデーションをオンにした時だけ表示される、右側の2つの矢印ボタン
+        // グラデーションをオンにした時だけ表示される、右側の2つの矢印ボタン + その間のスウォッチ
+        // (パネルが狭い場合でも右端をはみ出さないよう、パネルの右端を上限にクランプする)
+        int panelRightEdge = panelX + panelW - 24;
+        int secondaryLeftX = Math.min(fieldX + 138, panelRightEdge - 56);
+        int swatchX = secondaryLeftX + 20;
+        int secondaryRightX = swatchX + 20;
+        this.secondarySwatchX = swatchX;
+
         secondaryColorLeftButton = Button.builder(Component.literal("←"), b -> {
             if (entry.colors.size() > 1) {
                 int cur = entry.colors.get(1);
                 entry.colors.set(1, cur - 1);
             }
-        }).bounds(fieldX + 138, rowY(6), 18, 18).build();
+        }).bounds(secondaryLeftX, rowY(6), 18, 18).build();
         addRenderableWidget(secondaryColorLeftButton);
 
         secondaryColorRightButton = Button.builder(Component.literal("→"), b -> {
@@ -138,9 +152,9 @@ public class HanabiEditScreen extends Screen {
                 int cur = entry.colors.get(1);
                 entry.colors.set(1, cur + 1);
             }
-        }).bounds(fieldX + 178, rowY(6), 18, 18).build();
+        }).bounds(secondaryRightX, rowY(6), 18, 18).build();
         addRenderableWidget(secondaryColorRightButton);
-        // ↑ 2つ目のスウォッチは render() 側で fieldX+158〜fieldX+176 に描画する。
+        // ↑ 2つ目のスウォッチは render() 側で secondarySwatchX を使って描画する。
 
         updateGradientButtonsVisibility();
 
@@ -148,14 +162,39 @@ public class HanabiEditScreen extends Screen {
         misfireToggleButton = Button.builder(misfireLabel(), b -> {
             entry.misfire = !entry.misfire;
             misfireToggleButton.setMessage(misfireLabel());
-        }).bounds(fieldX, rowY(7), 150, 18).build();
+        }).bounds(fieldX, rowY(7), Math.min(150, fieldW), 18).build();
         addRenderableWidget(misfireToggleButton);
 
-        // 保存 / 保存せずに戻る
+        // 8. カーブ（玉が上昇しながら「発射地点(offsetX/Z)からcurveOffsetX/Zぶんだけ離れた位置」へ
+        //    ease-in-outで曲がっていき、その曲がった先の頂点で爆発する。
+        //    不発と組み合わせれば「カーブした先で不発」も可能）
+        curveToggleButton = Button.builder(curveLabel(), b -> {
+            entry.curveEnabled = !entry.curveEnabled;
+            curveToggleButton.setMessage(curveLabel());
+            updateCurveFieldsVisibility();
+        }).bounds(fieldX, rowY(8), Math.min(150, fieldW), 18).build();
+        addRenderableWidget(curveToggleButton);
+
+        // 9. カーブ先 X / Z（カーブが有効な時だけ操作可能）
+        int curveHalfW = (fieldW - 8) / 2;
+        curveXBox = new EditBox(font, fieldX, rowY(9), curveHalfW, 18, Component.literal("curveX"));
+        curveXBox.setValue(trim(entry.curveOffsetX));
+        curveXBox.setResponder(s -> setFloatSafe(v -> entry.curveOffsetX = v, s));
+        addRenderableWidget(curveXBox);
+
+        curveZBox = new EditBox(font, fieldX + curveHalfW + 8, rowY(9), curveHalfW, 18, Component.literal("curveZ"));
+        curveZBox.setValue(trim(entry.curveOffsetZ));
+        curveZBox.setResponder(s -> setFloatSafe(v -> entry.curveOffsetZ = v, s));
+        addRenderableWidget(curveZBox);
+
+        updateCurveFieldsVisibility();
+
+        // 保存 / 保存せずに戻る（画面全体ではなく、実際のパネルの下端を基準に配置する）
+        int bottomBtnY = panelY + panelH - 34;
         addRenderableWidget(Button.builder(Component.translatable("gui.realhanabimod.save"), b -> onSave())
-                .bounds(width - 170, height - 34, 75, 20).build());
+                .bounds(panelX + panelW - 170, bottomBtnY, 75, 20).build());
         addRenderableWidget(Button.builder(Component.translatable("gui.realhanabimod.cancel"), b -> onCancel())
-                .bounds(width - 90, height - 34, 70, 20).build());
+                .bounds(panelX + panelW - 90, bottomBtnY, 70, 20).build());
     }
 
     private int rowY(int index) {
@@ -166,6 +205,20 @@ public class HanabiEditScreen extends Screen {
         return Component.translatable(entry.misfire
                 ? "gui.realhanabimod.misfire.on"
                 : "gui.realhanabimod.misfire.off");
+    }
+
+    private Component curveLabel() {
+        return Component.translatable(entry.curveEnabled
+                ? "gui.realhanabimod.curve.on"
+                : "gui.realhanabimod.curve.off");
+    }
+
+    private void updateCurveFieldsVisibility() {
+        boolean on = entry.curveEnabled;
+        curveXBox.visible = on;
+        curveXBox.active = on;
+        curveZBox.visible = on;
+        curveZBox.active = on;
     }
 
     private void updateGradientButtonsVisibility() {
@@ -218,6 +271,7 @@ public class HanabiEditScreen extends Screen {
             drawLabel(gfx, "爆発まで(秒)", rowY(3));
             drawLabel(gfx, "X / Z", rowY(4));
             drawLabel(gfx, "不発", rowY(7));
+            drawLabel(gfx, "カーブ移動量 X/Z", rowY(9));
 
             // メインの色スウォッチ（矢印のすぐ間、狭い間隔）＋色名
             int colorIdx = entry.colors.get(0);
@@ -227,7 +281,7 @@ public class HanabiEditScreen extends Screen {
 
             if (entry.colors.size() > 1) {
                 int rgb2 = ColorPresets.get(entry.colors.get(1));
-                gfx.fill(fieldX + 158, rowY(6), fieldX + 176, rowY(6) + 18, 0xFF000000 | rgb2);
+                gfx.fill(secondarySwatchX, rowY(6), secondarySwatchX + 18, rowY(6) + 18, 0xFF000000 | rgb2);
             }
         }
 
