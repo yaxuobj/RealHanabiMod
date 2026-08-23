@@ -1,5 +1,6 @@
 package com.realhanabimod.client.render;
 
+import com.mojang.blaze3d.platform.GlStateManager;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.*;
 import com.realhanabimod.RealHanabiMod;
@@ -65,7 +66,7 @@ public class SmokeRenderer {
         RenderSystem.setShaderColor(1F, 1F, 1F, 1F);
 
         RenderSystem.enableBlend();
-        RenderSystem.defaultBlendFunc(); // 通常の半透明ブレンド
+        RenderSystem.blendFunc(GlStateManager.SourceFactor.SRC_ALPHA, GlStateManager.DestFactor.ONE);
         RenderSystem.depthMask(false);
         RenderSystem.enableDepthTest();
         RenderSystem.disableCull();
@@ -95,9 +96,9 @@ public class SmokeRenderer {
             double posY = center.y + windY;
             double posZ = center.z + windZ;
 
-            float smokeSize = v.entry.size * (7.0f + (float) Math.sqrt(progress) * 7.0f);
+            float smokeSize = v.entry.size * (4.0f + (float) Math.sqrt(progress) * 4.0f);
 
-            float alpha = (float) Math.sin(progress * Math.PI) * 0.14f;
+            float alpha = (float) Math.sin(progress * Math.PI) * 1.0f;
 
             if (alpha <= 0.001f) continue;
 

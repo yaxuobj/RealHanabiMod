@@ -30,8 +30,8 @@ public class HanabiRenderer {
     private static final ResourceLocation HANABI_TEXTURE =
             new ResourceLocation(RealHanabiMod.MOD_ID, "textures/particle/hanabi.png");
 
-    private static final float BALL_SIZE = 0.55f;
-    private static final float TRAIL_WIDTH = 0.22f;
+    private static final float BALL_SIZE = 1.55f;
+    private static final float TRAIL_WIDTH = 0.42f;
 
     // --- 柳(willow)など「尾」を持つ火花用 ---
     private static final float SPARK_TRAIL_WIDTH = 0.10f;
@@ -44,7 +44,7 @@ public class HanabiRenderer {
     private static final float SPARK_TICK_DT = 1f / 20f;
     private static final float SPARK_DECAY_PER_TICK = 0.96f;
     private static final float SPARK_GRAVITY = 9.0f;
-    // ★実際の写真（長時間露光）は「動いた軌跡がまるごと写り込む」ため、瞬間的な移動量より
+    // 実際の写真（長時間露光）は「動いた軌跡がまるごと写り込む」ため、瞬間的な移動量より
     //   ずっと長く伸びて見える。ゲームはリアルタイム描画なので同じ効果を得るには、
     //   物理シミュレーション自体はそのまま(カーブの形はキープ)で、見た目の長さだけ
     //   発生点から実際より遠くまで引き伸ばす。これにより爆発直後から「もう糸を引いている」
@@ -117,7 +117,12 @@ public class HanabiRenderer {
         );
 
         RenderSystem.depthMask(false);
-        RenderSystem.enableDepthTest();
+        // 雲（や遠くの地形）に隠れて花火が欠けて見えるのを防ぐため、深度テストを無効化する。
+        //   花火は空高くで展開されるため、手前にある雲の深度値によって火花・尾が
+        //   クリップされてしまうことがあった。深度テストを切ることで、常に手前(最前面)に
+        //   描画されるようにする。花火自体は不透明な近距離オブジェクトを覆い隠すものではないため、
+        //   見た目上の破綻は起きにくい。
+        RenderSystem.disableDepthTest();
         RenderSystem.disableCull();
 
         BufferBuilder buffer = Tesselator.getInstance().getBuilder();
@@ -202,6 +207,7 @@ public class HanabiRenderer {
 
         RenderSystem.enableCull();
         RenderSystem.depthMask(true);
+        RenderSystem.enableDepthTest(); // 後続の描画に影響しないよう、通常状態(深度テスト有効)に戻す
         RenderSystem.defaultBlendFunc();
         RenderSystem.disableBlend();
         RenderSystem.setShaderColor(1F, 1F, 1F, 1F);
@@ -350,7 +356,7 @@ public class HanabiRenderer {
         float g = ((rgb >> 8) & 255) / 255F;
         float b = (rgb & 255) / 255F;
 
-        // ★明暗を「発生点(天辺)側が明るく、垂れ下がった先端側が暗く消える」向きにする。
+        // 明暗を「発生点(天辺)側が明るく、垂れ下がった先端側が暗く消える」向きにする。
         //   天辺は複数の火花のtrailOriginがほぼ同じ点に重なるため、加算合成で明るいコア(白飛び)になり、
         //   そこから伸びる尾は下に行くほど暗くなって消える＝「天辺は残り、周りが垂れる」見た目になる。
         float originAlpha = 0.9F * alpha;

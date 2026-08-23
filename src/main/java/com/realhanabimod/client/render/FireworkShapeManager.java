@@ -108,7 +108,7 @@ public class FireworkShapeManager {
             Vector3f dir = new Vector3f(sqrt * Mth.cos(theta), u, sqrt * Mth.sin(theta));
             if (dir.length() > 0.0001f) dir.normalize();
 
-            // ★画像上部の「いくつかの房（ふさ）」のニュアンスをコサイン波で作る（8束ほど）
+            // 画像上部の「いくつかの房（ふさ）」のニュアンスをコサイン波で作る（8束ほど）
             float bunch = 1.0f + 0.3f * Mth.cos(8f * theta);
 
             // 初速の差を大きく取る。これにより内側で垂れる星と、外側までアーチを描く星の「層」ができる
@@ -118,7 +118,7 @@ public class FireworkShapeManager {
             // ザラザラ感を出すための細かい時間差（ディレイ）
             float delay = r.nextFloat() * 0.25f;
 
-            // ★玉と同じ「尾」を火花1つ1つにも持たせる。値が大きいほど、頭(現在位置)に対して
+            // 玉と同じ「尾」を火花1つ1つにも持たせる。値が大きいほど、頭(現在位置)に対して
             //   尾の追従点が遅れて付いてくるようになり＝より長く尾を引いて垂れる。
             //   （以前の速度依存の短い尾から、4倍前後よく垂れるように引き上げ済み）
             float trailScale = 3.2f + r.nextFloat() * 4.0f;

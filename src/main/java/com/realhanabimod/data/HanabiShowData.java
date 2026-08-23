@@ -19,7 +19,6 @@ public class HanabiShowData {
         return items.isEmpty();
     }
 
-    /** 花火を末尾に追加する。既に要素がある場合は先に待機(1秒)を自動で挟む。 */
     public FireworkEntry addFirework() {
         if (!items.isEmpty()) {
             DelayEntry delay = new DelayEntry();

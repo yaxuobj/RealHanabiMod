@@ -17,12 +17,6 @@ import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import org.slf4j.Logger;
 import com.mojang.logging.LogUtils;
 
-/**
- * RealHanabiMod
- * 花火（打ち上げ花火）を再現するMOD。
- * 1つの設置ブロック「花火打ち上げ機」から、色・大きさ・高さ・座標をカスタマイズした
- * 花火のタイムラインを作成し再生できる。
- */
 @Mod(RealHanabiMod.MOD_ID)
 public class RealHanabiMod {
 

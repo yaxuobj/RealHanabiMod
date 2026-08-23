@@ -34,7 +34,6 @@ public class HanabiLauncherBlock extends Block implements EntityBlock {
         if (!level.isClientSide && player instanceof ServerPlayer serverPlayer) {
             BlockEntity be = level.getBlockEntity(pos);
             if (be instanceof HanabiLauncherBlockEntity launcher) {
-                // サーバー側で保持しているタイムラインをクライアントへ送りGUIを開かせる
                 NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> serverPlayer),
                         new OpenGuiPacket(pos, launcher.getShowData()));
             }

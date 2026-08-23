@@ -4,9 +4,7 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
 
 /**
- * 花火と花火の間に必ず1つ入る「待機時間」要素。
- * 例: ⏱ 10秒
- * 0以下は不可。最小 0.1 秒。
+待機時間
  */
 public class DelayEntry extends TimelineItem {
 
