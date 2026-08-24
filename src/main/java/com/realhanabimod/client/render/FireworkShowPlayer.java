@@ -6,8 +6,6 @@ import com.realhanabimod.init.ModSounds;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.sounds.SoundSource;
-import net.minecraft.world.level.ClipContext;
-import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -30,11 +28,6 @@ public class FireworkShowPlayer {
 
     public static final float SOUND_DELAY_SECONDS = 1.0f;
 
-    // 可視判定(壁越しに見えないか)を全花火まとめて毎tick行うと重いので、
-    // 花火ごとに少しずつタイミングをずらしながら CHECK_PERIOD_TICKS に1回だけ計算する。
-    private static final int CHECK_PERIOD_TICKS = 4; // 秒5回程度に間引く（描画は毎フレームだが判定は秒5回で十分）
-    private static int globalTickCounter = 0;
-
     public static List<FireworkVisual> getVisuals() {
         return VISUALS;
     }
@@ -53,7 +46,6 @@ public class FireworkShowPlayer {
         if (Minecraft.getInstance().isPaused()) return;
 
         float dt = 1f / 20f;
-        globalTickCounter++;
 
         // ショー進行：時間が来たら花火を発射（=FireworkVisual生成、上昇開始）
         Iterator<ActiveShow> showIt = ACTIVE_SHOWS.iterator();
@@ -117,28 +109,19 @@ public class FireworkShowPlayer {
     }
 
     /**
-     * 壁越しに見えないようにするための可視判定を、火花1粒ずつではなく花火(爆発)1つにつき1点だけ、
-     * かつ CHECK_PERIOD_TICKS に1回だけ計算してキャッシュする。
-     * 花火ごとに identityHashCode でタイミングをずらしているので、同時に大量の花火が
-     * 爆発していても判定処理が1tickに集中して重くなることを防いでいる。
+     * 以前はここで「爆発1つにつき代表点1つだけ」へレイキャストし、ブロックに当たったら
+     * 爆発全体（火花・尾すべて）を丸ごと非表示にしていた。しかしこれだと、現実の花火のように
+     * 「ブロックの隙間から一部だけ見える」という見え方ができず、代表点がブロックの陰に
+     * 入った瞬間に爆発全体が"パッ"と消えてしまう不自然な挙動になっていた。
+     * <p>
+     * ブロックによる遮蔽は、実際に描画する側（HanabiRenderer / SmokeRenderer）で
+     * GPUの深度テスト（本物のピクセル単位の判定）を有効にすることで正しく・部分的に
+     * 表現できるようになったため、ここでのレイキャストによる丸ごと非表示化は行わない。
+     * cachedVisible フィールド自体は他のコードから参照され続けているため残してあるが、
+     * 現在は常に true を返すだけの軽い処理になっている。
      */
     private static void updateVisibilityCache(FireworkVisual v) {
-        int offset = System.identityHashCode(v) % CHECK_PERIOD_TICKS;
-        if ((globalTickCounter + offset) % CHECK_PERIOD_TICKS != 0) return;
-
-        Minecraft mc = Minecraft.getInstance();
-        if (mc.level == null || mc.player == null || mc.gameRenderer == null) return;
-        Vec3 camPos = mc.gameRenderer.getMainCamera().getPosition();
-        Vec3 target = v.getVisibilityCheckPos();
-
-        double distSq = camPos.distanceToSqr(target);
-        if (distSq < 4.0) {
-            v.cachedVisible = true;
-            return;
-        }
-        ClipContext ctx = new ClipContext(camPos, target, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, mc.player);
-        HitResult result = mc.level.clip(ctx);
-        v.cachedVisible = result.getType() == HitResult.Type.MISS;
+        v.cachedVisible = true;
     }
 
     private static void queueSound(net.minecraft.sounds.SoundEvent event, Vec3 pos, float delay) {

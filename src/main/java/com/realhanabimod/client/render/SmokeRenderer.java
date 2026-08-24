@@ -22,6 +22,10 @@ import java.util.List;
 
 /**
  * 超軽量・半透明でリアルな煙を描画する専用レンダラー。
+ * ・ブロックにはGPUの深度テストで正しく（部分的に）隠れる。
+ * ・雲には隠れない…とするため一時的に描画タイミングをAFTER_WEATHERへ変更したが、その結果
+ *   カメラの向きによって位置がズレる不具合が出たため、位置の正しさを優先していったん
+ *   AFTER_PARTICLES に戻している（雲に隠れる問題への対応は保留中。HanabiRendererと同じ理由）。
  */
 @Mod.EventBusSubscriber(modid = RealHanabiMod.MOD_ID, value = Dist.CLIENT)
 public class SmokeRenderer {
@@ -42,6 +46,9 @@ public class SmokeRenderer {
 
     @SubscribeEvent
     public static void onRenderLevel(RenderLevelStageEvent event) {
+        // AFTER_WEATHER に変更して雲の後ろに回り込む対応を試したところ、そのステージでは
+        // カメラの向きによって煙の位置がズレる不具合が出たため、位置の正しさを優先して
+        // AFTER_PARTICLES に戻している（HanabiRendererと同じ理由。雲に隠れる問題への対応は保留中）。
         if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_PARTICLES) return;
 
         Minecraft mc = Minecraft.getInstance();
