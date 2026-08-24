@@ -37,7 +37,7 @@ public class HanabiRenderer {
     private static final ResourceLocation HANABI_TEXTURE =
             new ResourceLocation(RealHanabiMod.MOD_ID, "textures/particle/hanabi.png");
 
-    private static final float BALL_SIZE = 1.55f;
+    private static final float BALL_SIZE = 0.75f;
     private static final float TRAIL_WIDTH = 0.42f;
 
     // --- カーブ花火の玉の「尾」用（軌道に沿ったリボンで描く） ---
