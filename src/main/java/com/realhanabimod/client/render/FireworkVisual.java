@@ -62,6 +62,10 @@ public class FireworkVisual {
     // 可視判定(壁越しに見えないか)は tick 側(秒20回)で一定間隔ごとに計算してキャッシュする。
     public boolean cachedVisible = true;
 
+    // getBallPosAtTime()のイージングで使う減速係数。timeAtRelativeHeight()で高さ→時刻の逆算にも使うため
+    // メソッドローカルではなくクラス定数として共有する。
+    private static final double ASCEND_DECEL = 0.6;
+
     public FireworkVisual(Vec3 blockPos, FireworkEntry entry) {
         this.originBlockPos = blockPos;
         this.entry = entry;
@@ -71,7 +75,10 @@ public class FireworkVisual {
         // curveOffsetX/Z ぶんだけ離れた位置が爆発地点のXZになる＝玉はそちらへ向かって曲がりながら上昇していく。
         double apexX = entry.curveEnabled ? entry.offsetX + entry.curveOffsetX : entry.offsetX;
         double apexZ = entry.curveEnabled ? entry.offsetZ + entry.curveOffsetZ : entry.offsetZ;
-        this.apexPos = blockPos.add(apexX, entry.height, apexZ);
+        // 実際に爆発する高さ = height(玉が見えなくなる高さ) + extraExplodeHeight(見えなくなってから
+        // さらに上昇する高さ)。extraExplodeHeightが0(デフォルト)なら今まで通りheightちょうどで爆発する。
+        double apexHeight = entry.height + Math.max(0f, entry.extraExplodeHeight);
+        this.apexPos = blockPos.add(apexX, apexHeight, apexZ);
         // 毎回ぴったり1秒だと不自然なので 0.8〜1.2秒の範囲で花火ごとに固定の揺らぎを持たせる
         this.fuseDuration = 0.8f + (Math.abs(entry.uid) % 5) * 0.1f;
     }
@@ -87,8 +94,7 @@ public class FireworkVisual {
         // 終盤ほど減速するが、完全に止まりはしないカーブ（線形と二次イーズアウトのブレンド）。
         // eased = t + DECEL*(t - t^2) なので t=1 では必ず apexPos に到達しつつ、
         // 終端速度が初速の (1 - DECEL) 倍だけ残る＝止まりきらずに減速したまま爆発を迎える。
-        final double DECEL = 0.6;
-        double easedY = t + DECEL * (t - t * t);
+        double easedY = t + ASCEND_DECEL * (t - t * t);
         double y = launchPos.y + (apexPos.y - launchPos.y) * easedY;
 
         if (!entry.curveEnabled) {
@@ -115,10 +121,30 @@ public class FireworkVisual {
     }
 
     /**
-     * 玉（と尾）の発光の強さ。ASCENDING中はフルに光るが、頂点到達(FUSEフェーズ入り)した瞬間に
-     * 即座に消灯し、そのまま爆発までの「間」は真っ暗になる（現実の花火のように、じわっとではなくパッと消える）。
+     * 玉（と尾）の発光の強さ。
+     * <p>
+     * ・entry.extraExplodeHeight が 0（デフォルト）の場合は今まで通り：ASCENDING中はフルに光り、
+     * 　頂点到達(FUSEフェーズ入り)した瞬間から FUSE_FADE_OUT_TIME(0.2秒)かけてすっと消える。
+     * <p>
+     * ・entry.extraExplodeHeight が 0 より大きい場合：実際の頂点(apexPos)は height + extraExplodeHeight の
+     * 　高さにあるが、玉は今まで通り height に到達した時点で同じ0.2秒のなめらかなフェードで消え、
+     * 　そこから先（実際に爆発するまでの残りの上昇＋FUSEの「間」）はずっと見えないままになる。
+     * 　＝いつも通りの消え方のまま、実際の爆発だけが少し高い位置で起こる。
      */
     public float getBallGlow() {
+        if (entry.ballHidden) return 0f;
+
+        if (entry.extraExplodeHeight > 0.001f) {
+            float disappearTime = timeAtRelativeHeight(entry.height);
+            if (phase != Phase.ASCENDING) return 0f; // この時点で既にフェード済みのはず
+            if (ascendTimer < disappearTime) return 1.0f;
+            float fadeElapsed = ascendTimer - disappearTime;
+            if (fadeElapsed < FUSE_FADE_OUT_TIME) {
+                return 1.0f - (fadeElapsed / FUSE_FADE_OUT_TIME);
+            }
+            return 0f;
+        }
+
         if (phase == Phase.ASCENDING) return 1.0f;
         if (phase == Phase.FUSE) {
             if (fuseTimer < FUSE_FADE_OUT_TIME) {
@@ -127,6 +153,31 @@ public class FireworkVisual {
             return 0f;
         }
         return 0f;
+    }
+
+    /**
+     * 指定した「発射地点からの相対高さ」に到達するまでの経過秒数を、getBallPosAtTime()と同じイージング式を
+     * 逆算して求める。DECEL*t^2 - (1+DECEL)*t + easedTarget = 0 を t について解いている（0〜1の解を採用）。
+     */
+    private float timeAtRelativeHeight(float targetHeight) {
+        double apexHeight = apexPos.y - launchPos.y;
+        if (apexHeight <= 1.0E-4) return 0f;
+        double easedTarget = Mth.clamp(targetHeight / apexHeight, 0.0, 1.0);
+        double a = ASCEND_DECEL;
+        double b = -(1.0 + ASCEND_DECEL);
+        double c = easedTarget;
+        double disc = Math.max(0.0, b * b - 4 * a * c);
+        double t = (-b - Math.sqrt(disc)) / (2 * a);
+        t = Mth.clamp(t, 0.0, 1.0);
+        return (float) (t * Math.max(0.05f, entry.explodeTime));
+    }
+
+    /** ballHidden、または（extraExplodeHeight設定時に）既にフェードアウトし終えている場合に true。
+     * 玉本体・尾・煙など、上昇中の見た目全般の非表示判定に使う。 */
+    public boolean isAscendHidden() {
+        if (entry.ballHidden) return true;
+        if (entry.extraExplodeHeight <= 0.001f) return false;
+        return getBallGlow() <= 0.001f;
     }
 
     /**

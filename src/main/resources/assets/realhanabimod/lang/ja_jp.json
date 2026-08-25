@@ -13,6 +13,12 @@
   "gui.realhanabimod.gradient.toggle": "グラデーション切替",
   "gui.realhanabimod.misfire.on": "不発：ON（玉のみ）",
   "gui.realhanabimod.misfire.off": "不発：OFF",
+  "gui.realhanabimod.curve.on": "カーブ：ON",
+  "gui.realhanabimod.curve.off": "カーブ：OFF",
+  "gui.realhanabimod.ballhidden.on": "玉非表示：ON",
+  "gui.realhanabimod.ballhidden.off": "玉非表示：OFF",
+  "gui.realhanabimod.tailonly.on": "尾のみ：ON",
+  "gui.realhanabimod.tailonly.off": "尾のみ：OFF",
 
   "subtitle.realhanabimod.fly": "花火が打ち上がる",
   "subtitle.realhanabimod.explode": "花火が爆発する",

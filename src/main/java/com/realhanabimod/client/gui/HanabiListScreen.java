@@ -254,7 +254,10 @@ public class HanabiListScreen extends Screen {
             String design = FireworkShapeManager.designName(entry.designIndex);
             String label = "花火: " + design + " / " + colorName + " / 高さ" + (int) entry.height
                     + (entry.misfire ? " / 不発" : "")
-                    + (entry.curveEnabled ? " / カーブ" : "");
+                    + (entry.curveEnabled ? " / カーブ" : "")
+                    + (entry.ballHidden ? " / 玉非表示" : "")
+                    + (!entry.ballHidden && entry.tailOnly ? " / 尾のみ" : "")
+                    + (entry.extraExplodeHeight > 0.001f ? " / 消灯後+" + (int) entry.extraExplodeHeight : "");
             gfx.drawString(HanabiListScreen.this.font, label, x + 6, y + 6, 0xFFFFFF);
 
             // 緑色の編集ボタン

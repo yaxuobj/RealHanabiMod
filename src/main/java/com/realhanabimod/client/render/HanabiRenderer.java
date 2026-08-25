@@ -182,12 +182,16 @@ public class HanabiRenderer {
                 }
 
                 // --- 玉（Ball）本体の描画 ---
-                drawQuad(buffer, matrix,
-                        camRight, camUp,
-                        ballPos.x, ballPos.y, ballPos.z,
-                        BALL_SIZE,
-                        color,
-                        glow);
+                // tailOnly が有効な場合、玉本体（丸いスプライト）は描かず尾だけ見せる
+                // （ballHidden や消える高さの判定は既に glow<=0 の時点でこのブロック自体に入らないため、ここでは考慮不要）。
+                if (!v.entry.tailOnly) {
+                    drawQuad(buffer, matrix,
+                            camRight, camUp,
+                            ballPos.x, ballPos.y, ballPos.z,
+                            BALL_SIZE,
+                            color,
+                            glow);
+                }
 
             } else if (v.phase == FireworkVisual.Phase.EXPLODED) {
 

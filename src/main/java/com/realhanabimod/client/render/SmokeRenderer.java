@@ -110,6 +110,9 @@ public class SmokeRenderer {
             if (v == null || !v.cachedVisible) continue;
 
             if (v.phase == FireworkVisual.Phase.ASCENDING) {
+                // 玉が非表示設定(ballHidden)、または消える高さを超えている間は、光る玉・尾だけでなく
+                // 煙も一緒に非表示にする（実際の花火で、光が消えた場所からは煙も見えなくなるのが自然なため）。
+                if (v.isAscendHidden()) continue;
                 if (v.entry.curveEnabled) {
                     // カーブ花火は直線ではないので、専用の「軌道に沿ったリボン」描画に分岐する。
                     drawAscendSmokeTrailCurve(mc, buffer, matrix, viewDir, v);

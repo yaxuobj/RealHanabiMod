@@ -15,6 +15,10 @@
   "gui.realhanabimod.misfire.off": "Misfire: OFF",
   "gui.realhanabimod.curve.on": "Curve: ON",
   "gui.realhanabimod.curve.off": "Curve: OFF",
+  "gui.realhanabimod.ballhidden.on": "Hide ball: ON",
+  "gui.realhanabimod.ballhidden.off": "Hide ball: OFF",
+  "gui.realhanabimod.tailonly.on": "Tail only: ON",
+  "gui.realhanabimod.tailonly.off": "Tail only: OFF",
 
   "subtitle.realhanabimod.fly": "Firework launches",
   "subtitle.realhanabimod.explode": "Firework explodes",

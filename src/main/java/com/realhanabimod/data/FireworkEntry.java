@@ -23,6 +23,16 @@ import java.util.List;
  *               カーブの曲がり方（イージング）は ease-in-out（序盤・終盤はゆっくり、中間で最も速く曲がる）。
  * curveOffsetX/Z : カーブが有効な場合、発射地点(offsetX/Z)からの移動量（相対値）。例えば offsetX=5 で
  *               curveOffsetX=3 なら、爆発地点のXは 5+3=8 になる。0のままなら該当軸は曲がらない。
+ * ballHidden  : 玉（本体スプライト）と尾を、打ち上げ中ずっと完全に見えなくする。trueの場合、
+ *               tailOnlyの設定に関わらず打ち上げ中は何も描画されない（実際の花火で、玉自体が
+ *               昼間や逆光でほとんど見えないパターンを再現するための設定）。
+ * tailOnly    : trueの場合、玉本体（丸いスプライト）だけを描画せず、尾（軌跡）だけを表示する。
+ *               ballHiddenがtrueの時はこちらの設定は無視される（どのみち何も見えないため）。
+ * extraExplodeHeight : 玉が見た目上消えてから、実際に爆発するまでにさらに上昇する高さ（相対値、0以上）。
+ *               0なら今まで通り、height(打ち上がる高さ)がそのまま実際に爆発する高さになる（従来の見た目）。
+ *               0より大きい場合、玉（または尾）は今まで通りheightの高さで見えなくなるが、実際の爆発は
+ *               そこから更に extraExplodeHeight ぶん高い、height + extraExplodeHeight の高さで起こる
+ *               （実際の花火で、玉が消えた地点より高い位置で爆発するように見える現象を再現する）。
  */
 public class FireworkEntry extends TimelineItem {
 
@@ -37,6 +47,9 @@ public class FireworkEntry extends TimelineItem {
     public boolean curveEnabled = false; // カーブ（発射地点から横にずれた位置で爆発させる）
     public float curveOffsetX = 0.0f; // カーブの移動量（発射地点からの相対X）
     public float curveOffsetZ = 0.0f; // カーブの移動量（発射地点からの相対Z）
+    public boolean ballHidden = false; // 玉本体・尾ともに完全に非表示にする
+    public boolean tailOnly = false; // 玉本体だけ非表示にし、尾だけ表示する
+    public float extraExplodeHeight = 0.0f; // 玉が見えなくなってから、さらに何ブロック上で爆発するか
 
     @Override
     public int type() {
@@ -61,6 +74,9 @@ public class FireworkEntry extends TimelineItem {
         tag.putBoolean("CurveEnabled", curveEnabled);
         tag.putFloat("CurveX", curveOffsetX);
         tag.putFloat("CurveZ", curveOffsetZ);
+        tag.putBoolean("BallHidden", ballHidden);
+        tag.putBoolean("TailOnly", tailOnly);
+        tag.putFloat("ExtraExplodeHeight", extraExplodeHeight);
         return tag;
     }
 
@@ -85,6 +101,9 @@ public class FireworkEntry extends TimelineItem {
         // offsetX/Z(打ち上げ位置)と同じにしておく＝真上に打ち上がる従来通りの見た目になる。
         curveOffsetX = tag.contains("CurveX") ? tag.getFloat("CurveX") : offsetX;
         curveOffsetZ = tag.contains("CurveZ") ? tag.getFloat("CurveZ") : offsetZ;
+        ballHidden = tag.getBoolean("BallHidden");
+        tailOnly = tag.getBoolean("TailOnly");
+        extraExplodeHeight = tag.contains("ExtraExplodeHeight") ? Math.max(0f, tag.getFloat("ExtraExplodeHeight")) : 0f;
     }
 
     @Override
@@ -103,6 +122,9 @@ public class FireworkEntry extends TimelineItem {
         buf.writeBoolean(curveEnabled);
         buf.writeFloat(curveOffsetX);
         buf.writeFloat(curveOffsetZ);
+        buf.writeBoolean(ballHidden);
+        buf.writeBoolean(tailOnly);
+        buf.writeFloat(extraExplodeHeight);
     }
 
     @Override
@@ -120,6 +142,9 @@ public class FireworkEntry extends TimelineItem {
         curveEnabled = buf.readBoolean();
         curveOffsetX = buf.readFloat();
         curveOffsetZ = buf.readFloat();
+        ballHidden = buf.readBoolean();
+        tailOnly = buf.readBoolean();
+        extraExplodeHeight = Math.max(0f, buf.readFloat());
     }
 
     public FireworkEntry copy() {
@@ -136,6 +161,9 @@ public class FireworkEntry extends TimelineItem {
         e.curveEnabled = curveEnabled;
         e.curveOffsetX = curveOffsetX;
         e.curveOffsetZ = curveOffsetZ;
+        e.ballHidden = ballHidden;
+        e.tailOnly = tailOnly;
+        e.extraExplodeHeight = extraExplodeHeight;
         return e;
     }
 }
