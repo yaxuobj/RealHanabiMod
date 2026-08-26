@@ -31,23 +31,56 @@ import java.util.List;
  * ・影MOD(Iris/OptiFine系シェーダーパック)対応のため POSITION_COLOR_TEX_LIGHTMAP フォーマット＋
  *   ライトマップ付きシェーダーを使用し、uv2 を常にフルブライトに固定して発光表現する。
  * ・上昇中の玉は頂点到達後 FUSE フェーズに入り、光が消えてから一呼吸おいて爆発する。
+ * ・上昇中の玉の尾、および柳(willow)など火花の「尾」は、現実の長時間露光写真のように
+ *   減速しながら下から徐々にほどけていく見た目にするため、透明度のグラデーションではなく
+ *   進行度に応じたテクスチャの切り替え（firework1.png〜firework5.png）で表現している
+ *   （詳細は TrailBufferBatch / drawSparkTrailCurve のコメント参照）。
  */
 public class HanabiRenderer {
 
     private static final ResourceLocation HANABI_TEXTURE =
             new ResourceLocation(RealHanabiMod.MOD_ID, "textures/particle/hanabi.png");
 
+    // --- 各種「尾」共通：進行度に応じて切り替える5段階のほどけテクスチャ ---
+    // firework1(まだ四角い=ほどけていない) → firework5(ほぼ消えかけ=ほとんどほどけきった) の順。
+    // 上昇中の玉の尾と、爆発後の火花(柳など)の尾の両方で共有して使う。
+    private static final ResourceLocation[] TRAIL_UNRAVEL_TEXTURES = new ResourceLocation[] {
+            new ResourceLocation(RealHanabiMod.MOD_ID, "textures/particle/firework1.png"),
+            new ResourceLocation(RealHanabiMod.MOD_ID, "textures/particle/firework2.png"),
+            new ResourceLocation(RealHanabiMod.MOD_ID, "textures/particle/firework3.png"),
+            new ResourceLocation(RealHanabiMod.MOD_ID, "textures/particle/firework4.png"),
+            new ResourceLocation(RealHanabiMod.MOD_ID, "textures/particle/firework5.png"),
+    };
+
+    // 各テクスチャが担当する進行度(0.0〜1.0)の上限。
+    // 例: 進行度0.30なら「0.40以下」に最初に該当するfirework1.pngが選ばれる。
+    private static final float[] TRAIL_UNRAVEL_THRESHOLDS = {
+            0.40f, 0.55f, 0.70f, 0.85f, 1.00f
+    };
+
+    // 尾専用バッファの初期容量(バイト)。花火が多いフレームでも毎フレーム再確保(grow)が
+    // 何度も走らないよう、余裕を持ったサイズにしておく（足りない場合は自動で伸びる）。
+    private static final int TRAIL_BUFFER_INITIAL_CAPACITY = 262144; // 256KB
+
     private static final float BALL_SIZE = 0.75f;
     private static final float TRAIL_WIDTH = 0.42f;
 
+    // --- 上昇中の玉の「尾」を何分割してテクスチャを切り替えるか ---
+    // 直線・カーブ共通で、テクスチャの段数(5)にきれいに対応するよう6分割にしている。
+    private static final int BALL_TRAIL_UNRAVEL_SEGMENTS = 6;
+
     // --- カーブ花火の玉の「尾」用（軌道に沿ったリボンで描く） ---
-    // 直線の花火は今まで通り1枚のquadだけで済むので軽量。カーブ花火だけ、この分割数でリボンをつなぐ。
+    // 直線の花火は今まで通り軽量な分割リボンだけで済むが、カーブ花火は玉の実際の曲線軌道を
+    // なめらかに再現するため、こちらは曲がり具合の精度を優先してセグメント数を多めにしている。
     private static final int ASCEND_TRAIL_SEGMENTS = 8;
 
     // --- 柳(willow)など「尾」を持つ火花用 ---
     private static final float SPARK_TRAIL_WIDTH = 0.10f;
     // 曲がった尾を再現するために、実際の軌道(発生時の速度＋重力)を経過時間ぶん再計算して
     // つなぎ合わせる分割数。多いほど滑らかにカーブするが負荷も増える。
+    // ※この分割数は「テクスチャの切り替わり段階」の粒度も兼ねている
+    //   （TRAIL_UNRAVEL_THRESHOLDSが5段階なので、6分割だとほぼ1セグメントごとに
+    //   1段階ずつテクスチャが進んでいく自然な見た目になる）。
     private static final int SPARK_TRAIL_SEGMENTS = 6;
     // 上の再計算を安定させるための内部の細分ステップ数(1セグメントあたり)。
     private static final int SPARK_TRAIL_SUBSTEPS = 3;
@@ -69,6 +102,71 @@ public class HanabiRenderer {
 
     /** 常に最大光量 */
     private static final int FULL_BRIGHT = 0xF000F0;
+
+    /**
+     * 尾専用のバッファ本体（テクスチャ5段階分）。
+     * <p>
+     * 重要：これは絶対に毎フレーム new してはいけない。BufferBuilder は内部でオフヒープの
+     * ByteBuffer を確保しており、フレームごとに使い捨てて作り直すと、解放が追いつかず
+     * ネイティブメモリを圧迫し続け、最終的にクラッシュ(STATUS_STACK_BUFFER_OVERRUN等)の
+     * 原因になる。Tesselator のシングルトンバッファと同じ発想で、ゲーム起動中ずっと
+     * 同じインスタンスを使い回し、フレームごとには begin()/end() だけを呼ぶようにする。
+     */
+    private static final BufferBuilder[] TRAIL_BUFFERS = createTrailBuffers();
+
+    private static BufferBuilder[] createTrailBuffers() {
+        BufferBuilder[] buffers = new BufferBuilder[TRAIL_UNRAVEL_TEXTURES.length];
+        for (int i = 0; i < buffers.length; i++) {
+            buffers[i] = new BufferBuilder(TRAIL_BUFFER_INITIAL_CAPACITY);
+        }
+        return buffers;
+    }
+
+    /**
+     * 尾の1点が「進行度(0.0〜1.0)」のうちどこにあたるかを受け取り、
+     * それに対応する「ほどけテクスチャ」の配列インデックスを返す。
+     * TRAIL_UNRAVEL_THRESHOLDS の各しきい値以下になる最初の段階を採用する。
+     */
+    private static int pickTrailTextureIndex(float progress) {
+        for (int i = 0; i < TRAIL_UNRAVEL_THRESHOLDS.length; i++) {
+            if (progress <= TRAIL_UNRAVEL_THRESHOLDS[i]) {
+                return i;
+            }
+        }
+        return TRAIL_UNRAVEL_TEXTURES.length - 1;
+    }
+
+    /**
+     * 「尾」専用の描画バッチ。1回の BufferBuilder#begin〜#end では1枚のテクスチャしか
+     * 使えないため、玉本体や火花本体を描く既存のメインバッファ(hanabi.png固定)とは別に、
+     * 「ほどけ具合(進行度)」ごとに最大5本のバッファへ、該当する尾のquadだけを振り分けて
+     * 溜めていく。フレームの最後にテクスチャを切り替えながらまとめて描画することで、
+     * セグメント単位でテクスチャが変わる「ほどけていく尾」を実現する。
+     * <p>
+     * 実体である TRAIL_BUFFERS は static で使い回すため、このクラス自体は「今フレーム、
+     * どの段階が実際に使われたか」を覚えておくだけの軽量なラッパーであり、
+     * 毎フレーム new しても一切メモリ確保を伴わない。
+     */
+    private static final class TrailBufferBatch {
+        private final boolean[] started = new boolean[TRAIL_BUFFERS.length];
+
+        VertexConsumer get(int textureIndex) {
+            if (!started[textureIndex]) {
+                TRAIL_BUFFERS[textureIndex].begin(VertexFormat.Mode.QUADS,
+                        DefaultVertexFormat.POSITION_COLOR_TEX_LIGHTMAP);
+                started[textureIndex] = true;
+            }
+            return TRAIL_BUFFERS[textureIndex];
+        }
+
+        void drawAll() {
+            for (int i = 0; i < TRAIL_BUFFERS.length; i++) {
+                if (!started[i]) continue;
+                RenderSystem.setShaderTexture(0, TRAIL_UNRAVEL_TEXTURES[i]);
+                BufferUploader.drawWithShader(TRAIL_BUFFERS[i].end());
+            }
+        }
+    }
 
     @SubscribeEvent
     public static void onRenderLevel(RenderLevelStageEvent event) {
@@ -146,6 +244,10 @@ public class HanabiRenderer {
         buffer.begin(VertexFormat.Mode.QUADS,
                 DefaultVertexFormat.POSITION_COLOR_TEX_LIGHTMAP);
 
+        // 「尾」だけは進行度に応じてテクスチャが変わるため、メインバッファとは別に集計する。
+        // (TrailBufferBatch自体は軽量な使い捨てラッパーで、実体のバッファはstaticで使い回す)
+        TrailBufferBatch trailBatch = new TrailBufferBatch();
+
         for (FireworkVisual v : visuals) {
 
             if (!v.cachedVisible) continue;
@@ -170,9 +272,9 @@ public class HanabiRenderer {
                 if (currentTrailLen > 0.05f && tailScale > 0.001f) {
                     if (v.entry.curveEnabled) {
                         // カーブ花火は直線ではないので、専用の「軌道に沿ったリボン」描画に分岐する。
-                        drawAscendTrailCurve(buffer, matrix, viewDir, v, color, glow, tailScale);
+                        drawAscendTrailCurve(trailBatch, matrix, viewDir, v, color, glow, tailScale);
                     } else {
-                        drawTrailQuad(buffer, matrix, trailRight,
+                        drawTrailQuad(trailBatch, matrix, trailRight,
                                 ballPos.x, ballPos.y, ballPos.z,
                                 ballPos.y - currentTrailLen, // 縮んだ尾の一番下のY座標
                                 TRAIL_WIDTH,
@@ -208,7 +310,7 @@ public class HanabiRenderer {
 
                     // --- 柳などの「尾」を先に描く（火花本体の下に敷く） ---
                     if (sp.trailScale > 0.001f) {
-                        drawSparkTrailCurve(buffer, matrix, viewDir,
+                        drawSparkTrailCurve(trailBatch, matrix, viewDir,
                                 sp.trailOrigin, sp.initialVel, sp.age, sp.trailScale,
                                 v.entry.size, sp.alpha(), sp.color);
 
@@ -227,7 +329,11 @@ public class HanabiRenderer {
             }
         }
 
+        // まずメインバッファ(玉本体・火花本体)を hanabi.png で描画。
         BufferUploader.drawWithShader(buffer.end());
+
+        // 続けて、各種「尾」を進行度ごとのテクスチャに切り替えながら描画する。
+        trailBatch.drawAll();
 
         /* ========= 後始末 ========= */
 
@@ -302,10 +408,15 @@ public class HanabiRenderer {
     }
 
     /**
-     * 上昇中(および導火線待ち)の玉の下に伸びる「尾」を1枚の板だけで描画する。
-     * glow を掛けることで、光が消えていく演出(FUSEフェーズ)に合わせて尾も一緒にフェードする。
+     * 上昇中(および導火線待ち)の玉の下に伸びる、直線の「尾」を描画する。
+     * <p>
+     * 従来は1枚のquadで「下=透明→上=不透明」というアルファのグラデーションを付けていたが、
+     * 現実の花火は透明になって消えるのではなく減速しながら下からほどけていくように見えるため、
+     * BALL_TRAIL_UNRAVEL_SEGMENTS 枚のリボンに分割し、玉に近い側(新しい・進行度0)から
+     * 遠い側(古い・進行度1)にかけて firework1.png → firework5.png へと切り替える方式にした。
+     * 透明度自体は glow(および呼び出し元で掛けられているtailScale) による一律フェードのみ。
      */
-    private static void drawTrailQuad(VertexConsumer buffer,
+    private static void drawTrailQuad(TrailBufferBatch trailBatch,
                                       Matrix4f matrix,
                                       Vector3f right,
                                       double topX,
@@ -324,48 +435,69 @@ public class HanabiRenderer {
         float b = (rgb & 255) / 255F;
 
         float tx = (float) topX;
-        float ty = (float) topY;
         float tz = (float) topZ;
-        float by = (float) bottomY;
+        float topYf = (float) topY;
+        float bottomYf = (float) bottomY;
 
-        float topAlpha = 0.85F * glow;
+        float quadAlpha = 0.85F * glow;
 
-        buffer.vertex(matrix, tx - rx, by, tz - rz)
-                .color(r, g, b, 0F)
-                .uv(0, 1)
-                .uv2(FULL_BRIGHT)
-                .endVertex();
+        int segments = BALL_TRAIL_UNRAVEL_SEGMENTS;
 
-        buffer.vertex(matrix, tx + rx, by, tz + rz)
-                .color(r, g, b, 0F)
-                .uv(1, 1)
-                .uv2(FULL_BRIGHT)
-                .endVertex();
+        for (int seg = 0; seg < segments; seg++) {
+            // t0=0が玉のすぐ下(topY)、t1=1が尾の末端(bottomY)になるよう線形補間する。
+            float t0 = seg / (float) segments;
+            float t1 = (seg + 1) / (float) segments;
 
-        buffer.vertex(matrix, tx + rx, ty, tz + rz)
-                .color(r, g, b, topAlpha)
-                .uv(1, 0)
-                .uv2(FULL_BRIGHT)
-                .endVertex();
+            float y0 = topYf + (bottomYf - topYf) * t0;
+            float y1 = topYf + (bottomYf - topYf) * t1;
 
-        buffer.vertex(matrix, tx - rx, ty, tz - rz)
-                .color(r, g, b, topAlpha)
-                .uv(0, 0)
-                .uv2(FULL_BRIGHT)
-                .endVertex();
+            // 玉に近い(t=0)ほど進行度は低い(=新しい=firework1)、遠い(t=1)ほど進行度は高い(=firework5)。
+            float segProgress = (t0 + t1) * 0.5f;
+            int textureIndex = pickTrailTextureIndex(segProgress);
+            VertexConsumer buffer = trailBatch.get(textureIndex);
+
+            buffer.vertex(matrix, tx - rx, y0, tz - rz)
+                    .color(r, g, b, quadAlpha)
+                    .uv(0, 1)
+                    .uv2(FULL_BRIGHT)
+                    .endVertex();
+
+            buffer.vertex(matrix, tx + rx, y0, tz + rz)
+                    .color(r, g, b, quadAlpha)
+                    .uv(1, 1)
+                    .uv2(FULL_BRIGHT)
+                    .endVertex();
+
+            buffer.vertex(matrix, tx + rx, y1, tz + rz)
+                    .color(r, g, b, quadAlpha)
+                    .uv(1, 0)
+                    .uv2(FULL_BRIGHT)
+                    .endVertex();
+
+            buffer.vertex(matrix, tx - rx, y1, tz - rz)
+                    .color(r, g, b, quadAlpha)
+                    .uv(0, 0)
+                    .uv2(FULL_BRIGHT)
+                    .endVertex();
+        }
     }
 
     /**
      * カーブする花火専用の「尾」の描画。玉の尾(drawTrailQuad)は直線の花火では常に真上→真下の
-     * 固定直線1枚で済むが、カーブ花火は玉自体が曲線を描いて動くため、それに沿ってリボンを
+     * 固定直線で済むが、カーブ花火は玉自体が曲線を描いて動くため、それに沿ってリボンを
      * 描かないと発射地点から不自然に浮いた/ズレた尾になってしまう。
      * <p>
      * ここでは v.getBallPosAtTime(t) （玉の実際の軌道計算そのもの）を複数時刻でサンプリングし、
      * 得られた点列を drawSparkTrailCurve と同じ考え方のbillboardリボンでつなぐ。こうすることで
      * 「玉が今まさに通ってきた道のり」を毎フレーム正確に再構築でき、途中経過を保存しておく必要もない。
-     * 直線の花火はこの処理を通らないため、従来通り軽量な1枚のquadのままである。
+     * 直線の花火はこの処理を通らないため、従来通り軽量な分割リボンのままである。
+     * <p>
+     * 透明度のグラデーションは廃止し、drawTrailQuadと同じくテクスチャ切り替え方式にしている。
+     * サンプリングは startTime(古い・発射地点寄り) → endTime(新しい・玉の現在地) の順で
+     * 生成されるため、進行度は「新しいほど低い(firework1)」「古いほど高い(firework5)」になるよう
+     * インデックスを反転させて計算する。
      */
-    private static void drawAscendTrailCurve(VertexConsumer buffer,
+    private static void drawAscendTrailCurve(TrailBufferBatch trailBatch,
                                              Matrix4f matrix,
                                              Vector3f viewDir,
                                              FireworkVisual v,
@@ -384,7 +516,7 @@ public class HanabiRenderer {
         float b = (rgb & 255) / 255F;
 
         float halfWidth = TRAIL_WIDTH;
-        float topAlpha = 0.85F * glow;
+        float quadAlpha = 0.85F * glow;
 
         int segments = ASCEND_TRAIL_SEGMENTS;
         Vec3[] points = new Vec3[segments + 1];
@@ -417,33 +549,41 @@ public class HanabiRenderer {
             float x0 = (float) p0.x, y0 = (float) p0.y, z0 = (float) p0.z;
             float x1 = (float) p1.x, y1 = (float) p1.y, z1 = (float) p1.z;
 
-            // 発射地点側(seg=0)は透明→玉に近い側(seg=segments)ほど不透明、に線形補間する
-            // （直線版のdrawTrailQuadと同じ、下が透明・上が不透明というフェード方向）
-            float a0 = topAlpha * (seg / (float) segments);
-            float a1 = topAlpha * ((seg + 1) / (float) segments);
+            // points[0]=startTime(発射地点寄り=古い)、points[segments]=endTime(玉の現在地=新しい)
+            // なので、進行度は「新しいほど低い」ようにインデックスを反転させて求める。
+            float segMidFraction = (seg + 0.5f) / segments; // 0=古い側 → 1=新しい側
+            float segProgress = 1.0f - segMidFraction;       // 0=新しい(firework1) → 1=古い(firework5)
+            int textureIndex = pickTrailTextureIndex(segProgress);
+            VertexConsumer buffer = trailBatch.get(textureIndex);
 
             buffer.vertex(matrix, x0 - rx, y0 - ry, z0 - rz)
-                    .color(r, g, b, a0).uv(0, 1).uv2(FULL_BRIGHT).endVertex();
+                    .color(r, g, b, quadAlpha).uv(0, 1).uv2(FULL_BRIGHT).endVertex();
             buffer.vertex(matrix, x0 + rx, y0 + ry, z0 + rz)
-                    .color(r, g, b, a0).uv(1, 1).uv2(FULL_BRIGHT).endVertex();
+                    .color(r, g, b, quadAlpha).uv(1, 1).uv2(FULL_BRIGHT).endVertex();
             buffer.vertex(matrix, x1 + rx, y1 + ry, z1 + rz)
-                    .color(r, g, b, a1).uv(1, 0).uv2(FULL_BRIGHT).endVertex();
+                    .color(r, g, b, quadAlpha).uv(1, 0).uv2(FULL_BRIGHT).endVertex();
             buffer.vertex(matrix, x1 - rx, y1 - ry, z1 - rz)
-                    .color(r, g, b, a1).uv(0, 0).uv2(FULL_BRIGHT).endVertex();
+                    .color(r, g, b, quadAlpha).uv(0, 0).uv2(FULL_BRIGHT).endVertex();
         }
     }
 
     /**
      * 個々の火花（SparkParticle）の「尾」を、実際の落下軌道に沿った曲線（複数セグメントのリボン）として描く。
-     * 玉の尾(drawTrailQuad)は常に真上→真下の固定直線だったが、実際の柳花火の帯は、爆発直後は外側へ
-     * 弧を描くように広がり、重力で徐々に真下方向へカーブしていく＝1本の直線では再現できない。
      * <p>
-     * ここでは「発生時の速度(initialVel)」と「経過時間(age)」から、SparkParticle.tick()と同じ
-     * 減衰＋重力の式を使って軌道を数点に区切って再計算し、その点同士を billboard の帯でつないで
-     * カーブする尾を表現する。実際の頭の位置(pos)を直接使わないのは、こうすることで発生点から
-     * 現在に至るまでの「通ってきた道のり全体」を毎フレーム再構築でき、途中を保存しておく必要がないため。
+     * 現実の花火の尾（長時間露光で写る帯）は、下から透明になって消えるのではなく、
+     * 速度が落ちながら「下からほどけていく」ように見える。速度が落ちる処理そのものは
+     * 既存の軌道再シミュレーション（減衰＋重力）でカバーできているため、ここでは
+     * 従来やっていた「原点=不透明→先端=透明」というアルファのグラデーションを廃止し、
+     * 代わりに各セグメント(=軌道サンプル点をつないだ1枚のリボン片)ごとに、
+     * 「原点から先端までのうち何%地点か(進行度)」を計算して、その進行度に対応する
+     * ほどけテクスチャ(firework1.png〜firework5.png)へ描画先を振り分ける方式に変更している。
+     * <p>
+     * これにより、同じ火花の尾でもカーブに沿って何枚ものquadが並び、生成順(＝時間順)に
+     * 沿って手前(原点寄り)からfirework1→2→3→4→5と、テクスチャそのものが切り替わっていく。
+     * 個々のquadが使うテクスチャが異なるため、通常のメインバッファには混ぜられず、
+     * 呼び出し元から渡される TrailBufferBatch 経由でテクスチャ別のバッファに振り分けて積む。
      */
-    private static void drawSparkTrailCurve(VertexConsumer buffer,
+    private static void drawSparkTrailCurve(TrailBufferBatch trailBatch,
                                             Matrix4f matrix,
                                             Vector3f viewDir,
                                             Vec3 origin,
@@ -460,11 +600,11 @@ public class HanabiRenderer {
         float g = ((rgb >> 8) & 255) / 255F;
         float b = (rgb & 255) / 255F;
 
-        // 明暗を「発生点(天辺)側が明るく、垂れ下がった先端側が暗く消える」向きにする。
-        //   天辺は複数の火花のtrailOriginがほぼ同じ点に重なるため、加算合成で明るいコア(白飛び)になり、
-        //   そこから伸びる尾は下に行くほど暗くなって消える＝「天辺は残り、周りが垂れる」見た目になる。
-        float originAlpha = 0.9F * alpha;
-        float tipAlpha = 0.05F * alpha; // 完全な0ではなく、うっすら火の粉が見える程度に残す
+        // 「ほどけ具合」はテクスチャそのものが表現するため、透明度は火花自身の寿命フェード(alpha)を
+        // そのまま尾全体に一律で適用するだけにする（原点/先端間の人為的なグラデーションは行わない）。
+        // ただし、多数の火花のtrailOriginがほぼ同じ点に重なる原点付近は、加算合成によって
+        // 自然に明るいコア(白飛び)として浮かび上がる。
+        float quadAlpha = 0.9F * alpha;
         float halfWidth = SPARK_TRAIL_WIDTH * entrySize;
 
         // --- 発生時の速度から、経過時間(age)ぶんの軌道を細かく再シミュレートしてサンプル点を作る ---
@@ -518,32 +658,34 @@ public class HanabiRenderer {
             float x0 = (float) p0.x, y0 = (float) p0.y, z0 = (float) p0.z;
             float x1 = (float) p1.x, y1 = (float) p1.y, z1 = (float) p1.z;
 
-            // セグメントごとに、天辺側(seg=0)は明るく→先端側(seg=segments-1)は暗く、線形に補間する
-            float t0 = seg / (float) segments;
-            float t1 = (seg + 1) / (float) segments;
-            float a0 = originAlpha + (tipAlpha - originAlpha) * t0;
-            float a1 = originAlpha + (tipAlpha - originAlpha) * t1;
+            // このセグメントが、原点(0%)から先端(100%)までのうち何%地点にあたるかを求め、
+            // 対応するほどけテクスチャを選ぶ。中点(seg+0.5)/segmentsを使うことで、
+            // セグメントの前後どちらかに極端に寄らない、素直な段階分けになる。
+            // 原点側(seg=0)ほど新しい(=firework1)、先端側(seg=segments-1)ほど古い(=firework5)。
+            float segProgress = (seg + 0.5f) / segments;
+            int textureIndex = pickTrailTextureIndex(segProgress);
+            VertexConsumer buffer = trailBatch.get(textureIndex);
 
             buffer.vertex(matrix, x0 - rx, y0 - ry, z0 - rz)
-                    .color(r, g, b, a0)
+                    .color(r, g, b, quadAlpha)
                     .uv(0, 1)
                     .uv2(FULL_BRIGHT)
                     .endVertex();
 
             buffer.vertex(matrix, x0 + rx, y0 + ry, z0 + rz)
-                    .color(r, g, b, a0)
+                    .color(r, g, b, quadAlpha)
                     .uv(1, 1)
                     .uv2(FULL_BRIGHT)
                     .endVertex();
 
             buffer.vertex(matrix, x1 + rx, y1 + ry, z1 + rz)
-                    .color(r, g, b, a1)
+                    .color(r, g, b, quadAlpha)
                     .uv(1, 0)
                     .uv2(FULL_BRIGHT)
                     .endVertex();
 
             buffer.vertex(matrix, x1 - rx, y1 - ry, z1 - rz)
-                    .color(r, g, b, a1)
+                    .color(r, g, b, quadAlpha)
                     .uv(0, 0)
                     .uv2(FULL_BRIGHT)
                     .endVertex();
