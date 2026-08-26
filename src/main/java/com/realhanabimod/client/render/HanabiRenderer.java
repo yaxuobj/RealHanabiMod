@@ -62,8 +62,8 @@ public class HanabiRenderer {
     // 何度も走らないよう、余裕を持ったサイズにしておく（足りない場合は自動で伸びる）。
     private static final int TRAIL_BUFFER_INITIAL_CAPACITY = 262144; // 256KB
 
-    private static final float BALL_SIZE = 0.75f;
-    private static final float TRAIL_WIDTH = 0.42f;
+    private static final float BALL_SIZE = 0.55f;
+    private static final float TRAIL_WIDTH = 0.22f;
 
     // --- 上昇中の玉の「尾」を何分割してテクスチャを切り替えるか ---
     // 直線・カーブ共通で、テクスチャの段数(5)にきれいに対応するよう6分割にしている。
