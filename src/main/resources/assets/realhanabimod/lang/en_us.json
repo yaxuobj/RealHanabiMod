@@ -23,5 +23,6 @@
   "subtitle.realhanabimod.fly": "Firework launches",
   "subtitle.realhanabimod.explode": "Firework explodes",
   "subtitle.realhanabimod.crackle": "Firework crackles",
-  "subtitle.realhanabimod.launch": "Launcher fires"
+  "subtitle.realhanabimod.launch": "Launcher fires",
+  "gui.realhanabimod.add_timer": "Add Timer"
 }

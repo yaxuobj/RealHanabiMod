@@ -9,7 +9,9 @@ import java.util.List;
 
 /**
  * 1つの花火打ち上げ機が持つタイムライン全体。
- * [花火, 待機, 花火, 待機, 花火 ...] のように必ず花火の間に待機(DelayEntry)が挟まる。
+ * 花火(FireworkEntry)と待機(DelayEntry)が自由な順番で並ぶ。
+ * addFirework() は今まで通り花火+待機をセットで追加するが、addDelay() で待機だけを
+ * 単独のタイマーとしてどこにでも追加できる。
  */
 public class HanabiShowData {
 
@@ -32,6 +34,15 @@ public class HanabiShowData {
         return entry;
     }
 
+    /** 花火とは独立して、単独のタイマー(待機)をタイムライン末尾に追加する。 */
+    public DelayEntry addDelay() {
+        DelayEntry delay = new DelayEntry();
+        delay.uid = System.nanoTime();
+        delay.seconds = 1.0f;
+        items.add(delay);
+        return delay;
+    }
+
     /** 指定した花火を複製し、その直後（待機を挟んで）に挿入する。 */
     public FireworkEntry duplicate(long fireworkUid) {
         int idx = indexOf(fireworkUid);
@@ -48,6 +59,10 @@ public class HanabiShowData {
         return copy;
     }
 
+    /**
+     * 花火を削除する。花火に付随していた待機(前後どちらか片方)も一緒に削除して整合を保つ。
+     * タイマー単体の削除には使わないこと（removeTimer を使う）。
+     */
     public void remove(long uid) {
         int idx = indexOf(uid);
         if (idx < 0) return;
@@ -58,6 +73,16 @@ public class HanabiShowData {
         } else if (idx - 1 >= 0 && items.get(idx - 1) instanceof DelayEntry) {
             items.remove(idx - 1);
         }
+    }
+
+    /**
+     * 単独のタイマー(待機)だけをそのまま削除する。remove() と違い、
+     * 隣接する要素を巻き添えで消す後始末は行わない。
+     */
+    public void removeTimer(long uid) {
+        int idx = indexOf(uid);
+        if (idx < 0) return;
+        items.remove(idx);
     }
 
     public int indexOf(long uid) {
