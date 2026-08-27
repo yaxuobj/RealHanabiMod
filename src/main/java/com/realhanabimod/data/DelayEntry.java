@@ -8,7 +8,7 @@ import net.minecraft.network.FriendlyByteBuf;
  */
 public class DelayEntry extends TimelineItem {
 
-    public static final float MIN_SECONDS = 0.1f;
+    public static final float MIN_SECONDS = 0.0f;
 
     public float seconds = 1.0f;
 

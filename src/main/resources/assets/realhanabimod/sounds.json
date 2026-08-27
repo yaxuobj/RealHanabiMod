@@ -16,5 +16,11 @@
     "sounds": [
       { "name": "realhanabimod:crackle", "stream": false }
     ]
+  },
+  "launch": {
+    "subtitle": "subtitle.realhanabimod.launch",
+    "sounds": [
+      { "name": "realhanabimod:launch", "stream": false }
+    ]
   }
 }
