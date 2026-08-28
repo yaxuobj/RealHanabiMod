@@ -65,13 +65,9 @@ public class HanabiRenderer {
     private static final float BALL_SIZE = 0.55f;
     private static final float TRAIL_WIDTH = 0.22f;
 
-    // --- 上昇中の玉の「尾」を何分割してテクスチャを切り替えるか ---
-    // 直線・カーブ共通で、テクスチャの段数(5)にきれいに対応するよう6分割にしている。
-    private static final int BALL_TRAIL_UNRAVEL_SEGMENTS = 6;
-
-    // --- カーブ花火の玉の「尾」用（軌道に沿ったリボンで描く） ---
-    // 直線の花火は今まで通り軽量な分割リボンだけで済むが、カーブ花火は玉の実際の曲線軌道を
-    // なめらかに再現するため、こちらは曲がり具合の精度を優先してセグメント数を多めにしている。
+    // --- 上昇中の玉の「尾」用（軌道に沿ったリボンで描く） ---
+    // 直線・カーブを問わず玉の実際の軌道(wobbleによる螺旋を含む)をなめらかに再現するため、
+    // 曲がり具合の精度を優先してセグメント数を多めにしている。
     private static final int ASCEND_TRAIL_SEGMENTS = 8;
 
     // --- 柳(willow)など「尾」を持つ火花用 ---
@@ -188,13 +184,6 @@ public class HanabiRenderer {
         Vector3f camRight = new Vector3f(1, 0, 0).rotate(camRot);
 
         Vector3f viewDir = new Vector3f(0, 0, -1).rotate(camRot);
-        Vector3f trailRight = new Vector3f();
-        new Vector3f(0, 1, 0).cross(viewDir, trailRight);
-
-        if (trailRight.lengthSquared() < 1.0E-6F) {
-            trailRight.set(1, 0, 0);
-        }
-        trailRight.normalize();
 
         int totalSparks = 0;
         for (FireworkVisual v : visuals) {
@@ -270,22 +259,20 @@ public class HanabiRenderer {
 
                 // 尾の長さがあり、かつスケールが0じゃない時だけ尾を描画
                 if (currentTrailLen > 0.05f && tailScale > 0.001f) {
-                    if (v.entry.curveEnabled) {
-                        // カーブ花火は直線ではないので、専用の「軌道に沿ったリボン」描画に分岐する。
-                        drawAscendTrailCurve(trailBatch, matrix, viewDir, v, color, glow, tailScale);
-                    } else {
-                        drawTrailQuad(trailBatch, matrix, trailRight,
-                                ballPos.x, ballPos.y, ballPos.z,
-                                ballPos.y - currentTrailLen, // 縮んだ尾の一番下のY座標
-                                TRAIL_WIDTH,
-                                color,
-                                glow * tailScale); // 縮むと同時に透明度もスッと薄くする
-                    }
+                    // カーブ花火はもちろん、直線の花火も玉自体が中心軸から少しズレて螺旋を描く
+                    // ように動く(wobble、FireworkVisual側の実装)ため、尾も「玉が実際に通ってきた
+                    // 軌道」をそのままなぞらないと、玉の位置とズレた直線の尾になってしまう。
+                    // そのため、直線・カーブを問わず常に軌道サンプリング方式(drawAscendTrailCurve)を使う。
+                    drawAscendTrailCurve(trailBatch, matrix, viewDir, v, color, glow, tailScale);
                 }
 
                 // --- 玉（Ball）本体の描画 ---
                 // tailOnly が有効な場合、玉本体（丸いスプライト）は描かず尾だけ見せる
                 // （ballHidden や消える高さの判定は既に glow<=0 の時点でこのブロック自体に入らないため、ここでは考慮不要）。
+                // ※以前はここでビルボード自体をクルクル自転させていたが、hanabi.png(玉本体)は
+                //   左右対称な円形テクスチャのため自転させても見た目上ほぼ変化がなかった。
+                //   実際の「くねくね」感は玉の自転ではなく、FireworkVisual側で実座標そのものを
+                //   中心軸から少しズラして螺旋状に動かす(wobble)ことで表現している。
                 if (!v.entry.tailOnly) {
                     drawQuad(buffer, matrix,
                             camRight, camUp,
@@ -408,91 +395,19 @@ public class HanabiRenderer {
     }
 
     /**
-     * 上昇中(および導火線待ち)の玉の下に伸びる、直線の「尾」を描画する。
+     * 上昇中(および導火線待ち)の玉の下に伸びる「尾」を、玉が実際に通ってきた軌道に沿った
+     * リボン(billboard)として描画する。
      * <p>
-     * 従来は1枚のquadで「下=透明→上=不透明」というアルファのグラデーションを付けていたが、
-     * 現実の花火は透明になって消えるのではなく減速しながら下からほどけていくように見えるため、
-     * BALL_TRAIL_UNRAVEL_SEGMENTS 枚のリボンに分割し、玉に近い側(新しい・進行度0)から
-     * 遠い側(古い・進行度1)にかけて firework1.png → firework5.png へと切り替える方式にした。
-     * 透明度自体は glow(および呼び出し元で掛けられているtailScale) による一律フェードのみ。
-     */
-    private static void drawTrailQuad(TrailBufferBatch trailBatch,
-                                      Matrix4f matrix,
-                                      Vector3f right,
-                                      double topX,
-                                      double topY,
-                                      double topZ,
-                                      double bottomY,
-                                      float halfWidth,
-                                      int rgb,
-                                      float glow) {
-
-        float rx = right.x * halfWidth;
-        float rz = right.z * halfWidth;
-
-        float r = ((rgb >> 16) & 255) / 255F;
-        float g = ((rgb >> 8) & 255) / 255F;
-        float b = (rgb & 255) / 255F;
-
-        float tx = (float) topX;
-        float tz = (float) topZ;
-        float topYf = (float) topY;
-        float bottomYf = (float) bottomY;
-
-        float quadAlpha = 0.85F * glow;
-
-        int segments = BALL_TRAIL_UNRAVEL_SEGMENTS;
-
-        for (int seg = 0; seg < segments; seg++) {
-            // t0=0が玉のすぐ下(topY)、t1=1が尾の末端(bottomY)になるよう線形補間する。
-            float t0 = seg / (float) segments;
-            float t1 = (seg + 1) / (float) segments;
-
-            float y0 = topYf + (bottomYf - topYf) * t0;
-            float y1 = topYf + (bottomYf - topYf) * t1;
-
-            // 玉に近い(t=0)ほど進行度は低い(=新しい=firework1)、遠い(t=1)ほど進行度は高い(=firework5)。
-            float segProgress = (t0 + t1) * 0.5f;
-            int textureIndex = pickTrailTextureIndex(segProgress);
-            VertexConsumer buffer = trailBatch.get(textureIndex);
-
-            buffer.vertex(matrix, tx - rx, y0, tz - rz)
-                    .color(r, g, b, quadAlpha)
-                    .uv(0, 1)
-                    .uv2(FULL_BRIGHT)
-                    .endVertex();
-
-            buffer.vertex(matrix, tx + rx, y0, tz + rz)
-                    .color(r, g, b, quadAlpha)
-                    .uv(1, 1)
-                    .uv2(FULL_BRIGHT)
-                    .endVertex();
-
-            buffer.vertex(matrix, tx + rx, y1, tz + rz)
-                    .color(r, g, b, quadAlpha)
-                    .uv(1, 0)
-                    .uv2(FULL_BRIGHT)
-                    .endVertex();
-
-            buffer.vertex(matrix, tx - rx, y1, tz - rz)
-                    .color(r, g, b, quadAlpha)
-                    .uv(0, 0)
-                    .uv2(FULL_BRIGHT)
-                    .endVertex();
-        }
-    }
-
-    /**
-     * カーブする花火専用の「尾」の描画。玉の尾(drawTrailQuad)は直線の花火では常に真上→真下の
-     * 固定直線で済むが、カーブ花火は玉自体が曲線を描いて動くため、それに沿ってリボンを
-     * 描かないと発射地点から不自然に浮いた/ズレた尾になってしまう。
+     * 以前は直線の花火だけ「発射地点の真上→真下」という固定の直線quadで済ませていたが、
+     * FireworkVisual側で玉の実座標に中心軸からの螺旋状のズレ(wobble)を持たせたことで、
+     * 直線の花火であってもY軸方向にまっすぐには上昇しなくなった。そのため、直線・カーブを
+     * 問わず常に v.getBallPosAtTime(t) （玉の実際の軌道計算そのもの）を複数時刻でサンプリングし、
+     * 得られた点列を drawSparkTrailCurve と同じ考え方のbillboardリボンでつなぐことで、
+     * 「玉が今まさに通ってきた道のり(＝くねくねした尾)」を毎フレーム正確に再構築している。
+     * 途中経過を別途保存しておく必要がないのもこの方式の利点。
      * <p>
-     * ここでは v.getBallPosAtTime(t) （玉の実際の軌道計算そのもの）を複数時刻でサンプリングし、
-     * 得られた点列を drawSparkTrailCurve と同じ考え方のbillboardリボンでつなぐ。こうすることで
-     * 「玉が今まさに通ってきた道のり」を毎フレーム正確に再構築でき、途中経過を保存しておく必要もない。
-     * 直線の花火はこの処理を通らないため、従来通り軽量な分割リボンのままである。
-     * <p>
-     * 透明度のグラデーションは廃止し、drawTrailQuadと同じくテクスチャ切り替え方式にしている。
+     * 透明度のグラデーションは行わず、進行度に応じたテクスチャ切り替え(firework1.png〜firework5.png)
+     * だけで「下からほどけていく」見た目を表現している。
      * サンプリングは startTime(古い・発射地点寄り) → endTime(新しい・玉の現在地) の順で
      * 生成されるため、進行度は「新しいほど低い(firework1)」「古いほど高い(firework5)」になるよう
      * インデックスを反転させて計算する。

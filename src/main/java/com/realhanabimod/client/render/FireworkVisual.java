@@ -67,6 +67,21 @@ public class FireworkVisual {
     // メソッドローカルではなくクラス定数として共有する。
     private static final double ASCEND_DECEL = 0.6;
 
+    // --- 上昇中の玉の「くねくね」感（wobble） ---
+    // 現実の打ち上げ花火は、玉（および尾）が中心の軌道からわずかに横にズレた位置を、
+    // そのまま回転しながら上昇していくため、遠目に見ると軌道全体がゆるく螺旋を描いて
+    // くねくねしているように見える。これを再現するため、直線・カーブに関わらず
+    // getBallPosAtTime() の水平座標(X/Z)へ小さな円運動のオフセットを加える。
+    // ・半径は花火の大きさ(size)に比例させ、大玉ほど大きくくねるようにする。
+    // ・打ち上げ開始直後(t=0)と頂点到達時(t=1)ではオフセットを0にフェードし、
+    // 　発射地点や爆発地点(apexPos)がズレて見えない/軌道と食い違わないようにする。
+    private static final double WOBBLE_RADIUS_PER_SIZE = 0.12;
+    private static final double WOBBLE_RADIANS_PER_SECOND = 9.0;
+
+    // wobbleの初期回転角。花火ごとに毎回同じ向きにくねると不自然なので、entry.uidから
+    // 花火ごとに固定の値をばらけさせている（fuseDurationの揺らぎと同じ考え方）。
+    private final double wobblePhase;
+
     public FireworkVisual(Vec3 blockPos, FireworkEntry entry) {
         this.originBlockPos = blockPos;
         this.entry = entry;
@@ -82,6 +97,8 @@ public class FireworkVisual {
         this.apexPos = blockPos.add(apexX, apexHeight, apexZ);
         // 毎回ぴったり1秒だと不自然なので 0.8〜1.2秒の範囲で花火ごとに固定の揺らぎを持たせる
         this.fuseDuration = 0.8f + (Math.abs(entry.uid) % 5) * 0.1f;
+        // wobbleの初期角度も花火ごとにばらけさせる（0〜2πの範囲）
+        this.wobblePhase = (Math.abs(entry.uid) % 360) / 360.0 * (2.0 * Math.PI);
     }
 
     /**
@@ -98,17 +115,31 @@ public class FireworkVisual {
         double easedY = t + ASCEND_DECEL * (t - t * t);
         double y = launchPos.y + (apexPos.y - launchPos.y) * easedY;
 
+        double x, z;
         if (!entry.curveEnabled) {
             // カーブ無効時は今まで通りXZ固定（真上に上昇するだけ）。
-            return new Vec3(launchPos.x, y, launchPos.z);
+            x = launchPos.x;
+            z = launchPos.z;
+        } else {
+            // カーブ有効時：水平方向(X/Z)は垂直方向とは別に、ease-in-out（序盤・終盤はゆっくり、
+            // 中間で最も速く曲がる）のイージングで補間する。急に曲がり始めたり急に止まったりせず、
+            // なめらかに発射地点からカーブ先へ移動していく見た目になる。
+            double horizT = easeInOutQuad(t);
+            x = launchPos.x + (apexPos.x - launchPos.x) * horizT;
+            z = launchPos.z + (apexPos.z - launchPos.z) * horizT;
         }
 
-        // カーブ有効時：水平方向(X/Z)は垂直方向とは別に、ease-in-out（序盤・終盤はゆっくり、
-        // 中間で最も速く曲がる）のイージングで補間する。急に曲がり始めたり急に止まったりせず、
-        // なめらかに発射地点からカーブ先へ移動していく見た目になる。
-        double horizT = easeInOutQuad(t);
-        double x = launchPos.x + (apexPos.x - launchPos.x) * horizT;
-        double z = launchPos.z + (apexPos.z - launchPos.z) * horizT;
+        // --- wobble（中心軌道からのくねくねしたズレ） ---
+        // 直線・カーブどちらの軌道にも、上で求めた中心座標(x, z)を軸とした小さな円運動を
+        // 上乗せする。t=0(発射地点)とt=1(頂点＝apexPos)では振幅を0にフェードし、
+        // 発射地点・爆発地点そのものはズレないようにする（sin(π*t)は両端で0、中間で最大）。
+        double wobbleAmp = WOBBLE_RADIUS_PER_SIZE * entry.size * Math.sin(Math.PI * t);
+        if (wobbleAmp > 1.0E-6) {
+            double wobbleAngle = wobblePhase + elapsedSeconds * WOBBLE_RADIANS_PER_SECOND;
+            x += wobbleAmp * Math.cos(wobbleAngle);
+            z += wobbleAmp * Math.sin(wobbleAngle);
+        }
+
         return new Vec3(x, y, z);
     }
 
