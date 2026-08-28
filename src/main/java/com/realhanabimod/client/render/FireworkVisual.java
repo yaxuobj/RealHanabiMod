@@ -1,5 +1,6 @@
 package com.realhanabimod.client.render;
 
+import com.realhanabimod.data.ColorGradient;
 import com.realhanabimod.data.ColorPresets;
 import com.realhanabimod.data.FireworkEntry;
 import net.minecraft.util.Mth;
@@ -277,14 +278,13 @@ public class FireworkVisual {
         List<FireworkShapeManager.Spark> pattern =
                 FireworkShapeManager.generate(entry.designIndex, entry.uid);
 
-        int[] palette = new int[entry.colors.size()];
-        for (int i = 0; i < palette.length; i++) {
-            palette[i] = ColorPresets.get(entry.colors.get(i));
-        }
+        // グラデーション各段のcolor1/color2を実際のRGBに解決した配列。
+        // [段0.color1, 段0.color2, 段1.color1, 段1.color2, ...] の順に並ぶ。
+        // 火花の色は「爆発パターン内での位置」ではなく「火花自身の経過時間」で決まるようにするため、
+        // 全ての火花で同じ配列を共有して構わない（SparkParticle側で年齢に応じて参照するだけ）。
+        int[] gradientStops = resolveGradientStops(entry.gradients);
 
         for (FireworkShapeManager.Spark spark : pattern) {
-            float grad = pattern.size() <= 1 ? 0f : sparks.size() / (float) pattern.size();
-            int color = palette.length == 1 ? palette[0] : lerpColor(palette, grad);
             double speed = 6.0 * entry.size * spark.speedScale();
             Vector3f d = spark.dir();
             Vec3 vel = new Vec3(d.x, d.y, d.z).scale(speed);
@@ -296,17 +296,26 @@ public class FireworkVisual {
                     ? Math.min(WILLOW_MAX_LIFE, 3.0f + spark.trailScale() * 0.5f)
                     : SPARK_LIFETIME;
 
-            sparks.add(new SparkParticle(apexPos, vel, color, maxLife, spark.trailScale()));
+            sparks.add(new SparkParticle(apexPos, vel, gradientStops, maxLife, spark.trailScale()));
         }
     }
 
-    private static int lerpColor(int[] palette, float t) {
-        float scaled = t * (palette.length - 1);
-        int i0 = (int) Math.floor(scaled);
-        int i1 = Math.min(palette.length - 1, i0 + 1);
-        float f = scaled - i0;
-        int c0 = palette[Math.max(0, Math.min(palette.length - 1, i0))];
-        int c1 = palette[i1];
+    /**
+     * グラデーション段のリストを、実際のRGB値の配列に解決する。
+     * 戻り値は [段0.color1, 段0.color2, 段1.color1, 段1.color2, ...] の順（長さ = 段数 * 2）。
+     */
+    private static int[] resolveGradientStops(List<ColorGradient> gradients) {
+        int n = Math.max(1, gradients.size());
+        int[] stops = new int[n * 2];
+        for (int i = 0; i < n; i++) {
+            ColorGradient g = i < gradients.size() ? gradients.get(i) : new ColorGradient(0, 0);
+            stops[i * 2] = ColorPresets.get(g.color1);
+            stops[i * 2 + 1] = ColorPresets.get(g.color2);
+        }
+        return stops;
+    }
+
+    private static int lerpRgb(int c0, int c1, float f) {
         int r = (int) (((c0 >> 16) & 0xFF) * (1 - f) + ((c1 >> 16) & 0xFF) * f);
         int g = (int) (((c0 >> 8) & 0xFF) * (1 - f) + ((c1 >> 8) & 0xFF) * f);
         int b = (int) ((c0 & 0xFF) * (1 - f) + (c1 & 0xFF) * f);
@@ -317,7 +326,14 @@ public class FireworkVisual {
     public static class SparkParticle {
         public Vec3 pos;
         public Vec3 vel;
-        public final int color;
+        /**
+         * グラデーション各段のRGBを解決済みの配列（[段0.c1, 段0.c2, 段1.c1, 段1.c2, ...]）。
+         * 全ての火花の寿命(maxLife)が終わるまでの間に、この配列の段数ぶんだけ均等な区間に分けて
+         * 順番に color1→color2 を辿っていく＝「花火の寿命とグラデーションの数」から自動でタイミングが決まる。
+         */
+        private final int[] gradientStops;
+        /** 現在の経過時間(age)に応じて算出された、今この瞬間の色。毎tick更新される。 */
+        public int color;
         public float life;
         public final float maxLife;
         /** 0なら尾なし。柳などデザイン側で指定された「尾の長さ」の倍率。 */
@@ -326,22 +342,19 @@ public class FireworkVisual {
         public final Vec3 trailOrigin;
         /** 発生した瞬間の速度。posの実際の軌道（カーブ）を再現するため、レンダラー側で使う。 */
         public final Vec3 initialVel;
-        /** 発生してからの経過時間（秒）。軌道再計算の「どこまで進んだか」に使う。 */
+        /** 発生してからの経過時間（秒）。軌道再計算の「どこまで進んだか」や色の切り替えタイミングに使う。 */
         public float age = 0f;
 
-        public SparkParticle(Vec3 pos, Vec3 vel, int color, float maxLife) {
-            this(pos, vel, color, maxLife, 0f);
-        }
-
-        public SparkParticle(Vec3 pos, Vec3 vel, int color, float maxLife, float trailScale) {
+        public SparkParticle(Vec3 pos, Vec3 vel, int[] gradientStops, float maxLife, float trailScale) {
             this.pos = pos;
             this.vel = vel;
-            this.color = color;
+            this.gradientStops = gradientStops;
             this.life = maxLife;
             this.maxLife = maxLife;
             this.trailScale = trailScale;
             this.trailOrigin = pos;
             this.initialVel = vel;
+            this.color = resolveColorAt(0f);
         }
 
         public void tick(float dt) {
@@ -350,6 +363,24 @@ public class FireworkVisual {
             vel = vel.scale(0.96).subtract(0, 9.0 * dt, 0);
             life -= dt;
             age += dt;
+            color = resolveColorAt(maxLife > 1.0E-4f ? age / maxLife : 1f);
+        }
+
+        /**
+         * 経過時間の割合(0〜1)から、その瞬間の色を算出する。
+         * 段数(gradientStops.length/2)ぶんに0〜1を均等分割し、どの段の中のどの位置にいるかを求めて
+         * その段のcolor1→color2をなめらかに補間する。段をまたぐ瞬間は次の段のcolor1へパッと切り替わる。
+         */
+        private int resolveColorAt(float t) {
+            int segments = gradientStops.length / 2;
+            if (segments <= 0) return 0xFFFFFF;
+            t = Mth.clamp(t, 0f, 1f);
+            float scaled = t * segments;
+            int seg = Math.min(segments - 1, (int) scaled);
+            float localT = scaled - seg;
+            int c0 = gradientStops[seg * 2];
+            int c1 = gradientStops[seg * 2 + 1];
+            return lerpRgb(c0, c1, localT);
         }
 
         public float alpha() {

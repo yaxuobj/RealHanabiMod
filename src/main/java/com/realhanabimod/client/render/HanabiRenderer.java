@@ -349,7 +349,7 @@ public class HanabiRenderer {
 
     /** 上昇中の玉の色。花火に設定された色(1色目)を使いつつ、発光している見た目を保つため少し白側に寄せる。 */
     private static int ballColor(FireworkVisual v) {
-        int base = ColorPresets.get(v.entry.colors.get(0));
+        int base = ColorPresets.get(v.entry.gradients.get(0).color1);
         float mixToWhite = 0.35f;
         int r = (int) (((base >> 16) & 0xFF) * (1 - mixToWhite) + 255 * mixToWhite);
         int g = (int) (((base >> 8) & 0xFF) * (1 - mixToWhite) + 255 * mixToWhite);

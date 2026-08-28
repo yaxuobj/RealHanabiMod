@@ -14,7 +14,10 @@ import java.util.List;
  * size        : 大きさ（爆発の広がり半径倍率）
  * height      : 打ち上がる高さ（ブロックからの相対Y）
  * offsetX/Z   : ブロックからのXZ位置ズレ
- * colors      : 色。1つなら単色、2つ以上ならグラデーション。
+ * gradients   : 色のグラデーション段のリスト（ColorGradient=color1→color2 の組）。1〜4段（MAX_GRADIENTS）まで。
+ *               「グラデーションを追加」ボタンで1段ずつ増やせる。常に最低1段（color1/color2）は存在する。
+ *               火花の寿命をこの段数で均等に分割し、各区間でcolor1→color2へ変化しながら
+ *               次の区間に入るタイミングで次の段のcolor1へ切り替わる、というタイミングを自動決定する。
  * misfire     : 不発フラグ。trueの場合、玉は打ち上がるが頂点で爆発せず、火花も音も出さずにそのまま消える。
  * curveEnabled: カーブ機能の有効/無効。trueの場合、玉は打ち上がりながら「発射地点(offsetX/Z)から
  *               curveOffsetX/Z ぶんだけ離れた位置」へ曲がっていき、その曲がった先の頂点で爆発する。
@@ -36,13 +39,17 @@ import java.util.List;
  */
 public class FireworkEntry extends TimelineItem {
 
+    /** グラデーションは最大でこの数まで追加できる（「グラデーションを追加」ボタンで増やせる上限）。 */
+    public static final int MAX_GRADIENTS = 4;
+
     public int designIndex = 0;
     public float size = 1.0f;
     public float height = 20.0f;
     public float explodeTime = 1.4f; // 打ち上げてから爆発するまでの秒数。高さとの比率で玉の上昇速度が決まる。
     public float offsetX = 0.0f;
     public float offsetZ = 0.0f;
-    public List<Integer> colors = new ArrayList<>(List.of(0)); // ColorPresetsのインデックス列
+    // 色のグラデーション段のリスト。常に最低1段（color1/color2）は存在する。最大 MAX_GRADIENTS 段。
+    public List<ColorGradient> gradients = new ArrayList<>(List.of(new ColorGradient(0, 0)));
     public boolean misfire = false; // 不発（玉だけ打ち上がり、爆発しない）
     public boolean curveEnabled = false; // カーブ（発射地点から横にずれた位置で爆発させる）
     public float curveOffsetX = 0.0f; // カーブの移動量（発射地点からの相対X）
@@ -67,9 +74,9 @@ public class FireworkEntry extends TimelineItem {
         tag.putFloat("ExplodeTime", explodeTime);
         tag.putFloat("OffX", offsetX);
         tag.putFloat("OffZ", offsetZ);
-        ListTag colorList = new ListTag();
-        for (int c : colors) colorList.add(IntTag.valueOf(c));
-        tag.put("Colors", colorList);
+        ListTag gradientList = new ListTag();
+        for (ColorGradient g : gradients) gradientList.add(g.writeNbt());
+        tag.put("Gradients", gradientList);
         tag.putBoolean("Misfire", misfire);
         tag.putBoolean("CurveEnabled", curveEnabled);
         tag.putFloat("CurveX", curveOffsetX);
@@ -89,12 +96,32 @@ public class FireworkEntry extends TimelineItem {
         explodeTime = tag.contains("ExplodeTime") ? Math.max(0.2f, tag.getFloat("ExplodeTime")) : 1.4f;
         offsetX = tag.getFloat("OffX");
         offsetZ = tag.getFloat("OffZ");
-        colors.clear();
-        ListTag colorList = tag.getList("Colors", 3); // 3 = IntTag
-        for (int i = 0; i < colorList.size(); i++) {
-            colors.add(((IntTag) colorList.get(i)).getAsInt());
+
+        gradients.clear();
+        if (tag.contains("Gradients")) {
+            // 新形式：ColorGradient（color1/color2の組）のリスト。
+            ListTag gradientList = tag.getList("Gradients", 10); // 10 = CompoundTag
+            for (int i = 0; i < gradientList.size(); i++) {
+                gradients.add(ColorGradient.readNbt(gradientList.getCompound(i)));
+            }
+        } else if (tag.contains("Colors")) {
+            // 旧形式：単純な色インデックスのリスト（1色なら単色、2色以上なら見た目の混ざるグラデーション）。
+            // これを新形式のグラデーション1段（color1=先頭色、color2=2色目があればそれ、無ければ先頭色と同じ）に変換する。
+            ListTag colorList = tag.getList("Colors", 3); // 3 = IntTag
+            List<Integer> oldColors = new ArrayList<>();
+            for (int i = 0; i < colorList.size(); i++) {
+                oldColors.add(((IntTag) colorList.get(i)).getAsInt());
+            }
+            if (oldColors.isEmpty()) oldColors.add(0);
+            int c1 = oldColors.get(0);
+            int c2 = oldColors.size() > 1 ? oldColors.get(1) : c1;
+            gradients.add(new ColorGradient(c1, c2));
         }
-        if (colors.isEmpty()) colors.add(0);
+        if (gradients.isEmpty()) gradients.add(new ColorGradient(0, 0));
+        if (gradients.size() > MAX_GRADIENTS) {
+            gradients = new ArrayList<>(gradients.subList(0, MAX_GRADIENTS));
+        }
+
         misfire = tag.getBoolean("Misfire");
         curveEnabled = tag.getBoolean("CurveEnabled");
         // 既存セーブ(カーブ機能がなかった頃)には CurveX/Z が存在しないので、その場合は
@@ -116,8 +143,8 @@ public class FireworkEntry extends TimelineItem {
         buf.writeFloat(explodeTime);
         buf.writeFloat(offsetX);
         buf.writeFloat(offsetZ);
-        buf.writeVarInt(colors.size());
-        for (int c : colors) buf.writeVarInt(c);
+        buf.writeVarInt(gradients.size());
+        for (ColorGradient g : gradients) g.writeBuf(buf);
         buf.writeBoolean(misfire);
         buf.writeBoolean(curveEnabled);
         buf.writeFloat(curveOffsetX);
@@ -136,8 +163,9 @@ public class FireworkEntry extends TimelineItem {
         offsetX = buf.readFloat();
         offsetZ = buf.readFloat();
         int n = buf.readVarInt();
-        colors.clear();
-        for (int i = 0; i < n; i++) colors.add(buf.readVarInt());
+        gradients.clear();
+        for (int i = 0; i < n; i++) gradients.add(ColorGradient.readBuf(buf));
+        if (gradients.isEmpty()) gradients.add(new ColorGradient(0, 0));
         misfire = buf.readBoolean();
         curveEnabled = buf.readBoolean();
         curveOffsetX = buf.readFloat();
@@ -156,7 +184,8 @@ public class FireworkEntry extends TimelineItem {
         e.explodeTime = explodeTime;
         e.offsetX = offsetX;
         e.offsetZ = offsetZ;
-        e.colors = new ArrayList<>(colors);
+        e.gradients = new ArrayList<>();
+        for (ColorGradient g : gradients) e.gradients.add(g.copy());
         e.misfire = misfire;
         e.curveEnabled = curveEnabled;
         e.curveOffsetX = curveOffsetX;

@@ -339,7 +339,7 @@ public class HanabiListScreen extends Screen {
             gfx.drawString(HanabiListScreen.this.font, numberLabel, x + 4, textY, 0xFFD37F);
             int numberW = HanabiListScreen.this.font.width(numberLabel);
 
-            String colorName = ColorPresets.getName(entry.colors.get(0));
+            String colorName = ColorPresets.getName(entry.gradients.get(0).color1);
             String design = FireworkShapeManager.designName(entry.designIndex);
             String label = design + " / " + colorName + " / 高さ" + (int) entry.height
                     + (entry.misfire ? " / 不発" : "")

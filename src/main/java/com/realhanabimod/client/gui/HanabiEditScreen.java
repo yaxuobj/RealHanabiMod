@@ -1,6 +1,7 @@
 package com.realhanabimod.client.gui;
 
 import com.realhanabimod.client.render.FireworkShapeManager;
+import com.realhanabimod.data.ColorGradient;
 import com.realhanabimod.data.ColorPresets;
 import com.realhanabimod.data.FireworkEntry;
 import com.realhanabimod.data.HanabiShowData;
@@ -31,8 +32,6 @@ public class HanabiEditScreen extends Screen {
     private EditBox curveXBox, curveZBox;
     private EditBox extraExplodeHeightBox;
 
-    private Button gradientToggleButton;
-    private Button secondaryColorLeftButton, secondaryColorRightButton;
     private Button misfireToggleButton;
     private Button curveToggleButton;
     private Button ballHiddenToggleButton;
@@ -105,59 +104,11 @@ public class HanabiEditScreen extends Screen {
         offsetZBox.setResponder(s -> setFloatSafe(v -> entry.offsetZ = v, s));
         this.list.add(new WidgetRow("X / Z", null, offsetXBox, offsetZBox));
 
-        // 5. 色
-        Button colorLeft = Button.builder(Component.literal("←"), b -> {
-            int cur = entry.colors.get(0);
-            entry.colors.set(0, cur - 1);
-        }).bounds(fieldX, 0, 20, fieldH).build();
-        Button colorRight = Button.builder(Component.literal("→"), b -> {
-            int cur = entry.colors.get(0);
-            entry.colors.set(0, cur + 1);
-        }).bounds(fieldX + 40, 0, 20, fieldH).build();
-
-        this.list.add(new WidgetRow("色", (gfx, top, left, w, h) -> {
-            int colorIdx = entry.colors.get(0);
-            int rgb = ColorPresets.get(colorIdx);
-            gfx.fill(fieldX + 22, top + (h - 18) / 2, fieldX + 38, top + (h - 18) / 2 + 18, 0xFF000000 | rgb);
-            gfx.drawString(font, ColorPresets.getName(colorIdx), fieldX + 65, top + (h - 9) / 2, 0xFFFFFF);
-        }, colorLeft, colorRight));
-
-        // 6. グラデーション
-        int gradientBtnW = 100;
-        gradientToggleButton = Button.builder(Component.translatable("gui.realhanabimod.gradient.toggle"), b -> {
-            if (entry.colors.size() > 1) {
-                entry.colors.remove(entry.colors.size() - 1);
-            } else {
-                entry.colors.add(entry.colors.get(0) + 1);
-            }
-            updateGradientButtonsVisibility();
-        }).bounds(fieldX, 0, gradientBtnW, fieldH).build();
-
-        int secLeftX = fieldX + gradientBtnW + 5;
-        int secRightX = secLeftX + 40;
-
-        secondaryColorLeftButton = Button.builder(Component.literal("←"), b -> {
-            if (entry.colors.size() > 1) {
-                int cur = entry.colors.get(1);
-                entry.colors.set(1, cur - 1);
-            }
-        }).bounds(secLeftX, 0, 20, fieldH).build();
-
-        secondaryColorRightButton = Button.builder(Component.literal("→"), b -> {
-            if (entry.colors.size() > 1) {
-                int cur = entry.colors.get(1);
-                entry.colors.set(1, cur + 1);
-            }
-        }).bounds(secRightX, 0, 20, fieldH).build();
-
-        this.list.add(new WidgetRow("グラデーション", (gfx, top, left, w, h) -> {
-            if (entry.colors.size() > 1) {
-                int rgb2 = ColorPresets.get(entry.colors.get(1));
-                gfx.fill(secLeftX + 22, top + (h - 18) / 2, secLeftX + 38, top + (h - 18) / 2 + 18, 0xFF000000 | rgb2);
-            }
-        }, gradientToggleButton, secondaryColorLeftButton, secondaryColorRightButton));
-
-        updateGradientButtonsVisibility();
+        // 5〜6. 色（グラデーション）
+        // color1・color2 は常に1組（グラデーション1段）存在する。「グラデーションを追加」ボタンで
+        // 最大 FireworkEntry.MAX_GRADIENTS(4) 段まで、color1/color2の組を追加していける。
+        // 色が切り替わるタイミングは、火花の寿命とこの段数から自動的に決まる（FireworkVisual側で算出）。
+        buildGradientRows(fieldX, fieldW, fieldH);
 
         // 7. 不発
         misfireToggleButton = Button.builder(misfireLabel(), b -> {
@@ -245,12 +196,79 @@ public class HanabiEditScreen extends Screen {
         tailOnlyToggleButton.active = relevant;
     }
 
-    private void updateGradientButtonsVisibility() {
-        boolean gradientOn = entry.colors.size() > 1;
-        secondaryColorLeftButton.visible = gradientOn;
-        secondaryColorLeftButton.active = gradientOn;
-        secondaryColorRightButton.visible = gradientOn;
-        secondaryColorRightButton.active = gradientOn;
+    /**
+     * 色（グラデーション）のリスト部分を構築する。
+     * entry.gradients の各段について「色1」「色2」の2行を作り、2段目以降には削除ボタンを添える。
+     * 最後に、上限(MAX_GRADIENTS)未満なら「グラデーションを追加」ボタンの行を1つ足す。
+     * <p>
+     * 段数の増減はリストの行数そのものを変えるため、追加・削除ボタンが押された際は
+     * rebuild() でスクリーン全体を作り直す（entry自体は同じインスタンスを参照し続けるのでデータは保持される）。
+     */
+    private void buildGradientRows(int fieldX, int fieldW, int fieldH) {
+        List<ColorGradient> gradients = entry.gradients;
+
+        for (int i = 0; i < gradients.size(); i++) {
+            final ColorGradient g = gradients.get(i);
+            final int idx = i;
+            boolean isFirst = (i == 0);
+            String prefix = isFirst ? "" : ("グラデーション" + (i + 1) + " ");
+
+            // --- 色1 ---
+            Button c1Left = Button.builder(Component.literal("←"), b -> g.color1--)
+                    .bounds(fieldX, 0, 20, fieldH).build();
+            Button c1Right = Button.builder(Component.literal("→"), b -> g.color1++)
+                    .bounds(fieldX + 40, 0, 20, fieldH).build();
+            this.list.add(new WidgetRow(prefix + "色1", (gfx, top, left, w, h) -> {
+                int rgb = ColorPresets.get(g.color1);
+                gfx.fill(fieldX + 22, top + (h - 18) / 2, fieldX + 38, top + (h - 18) / 2 + 18, 0xFF000000 | rgb);
+                gfx.drawString(font, ColorPresets.getName(g.color1), fieldX + 65, top + (h - 9) / 2, 0xFFFFFF);
+            }, c1Left, c1Right));
+
+            // --- 色2 ---
+            Button c2Left = Button.builder(Component.literal("←"), b -> g.color2--)
+                    .bounds(fieldX, 0, 20, fieldH).build();
+            Button c2Right = Button.builder(Component.literal("→"), b -> g.color2++)
+                    .bounds(fieldX + 40, 0, 20, fieldH).build();
+
+            java.util.List<AbstractWidget> row2Widgets = new java.util.ArrayList<>();
+            row2Widgets.add(c2Left);
+            row2Widgets.add(c2Right);
+
+            // 2段目以降（最初の1組は必ず残すので削除不可）にはこの色2の行に削除ボタンを添える。
+            if (!isFirst) {
+                Button removeButton = Button.builder(Component.translatable("gui.realhanabimod.gradient.remove"), b -> {
+                    entry.gradients.remove(idx);
+                    rebuild();
+                }).bounds(fieldX + 100, 0, 60, fieldH).build();
+                row2Widgets.add(removeButton);
+            }
+
+            this.list.add(new WidgetRow(prefix + "色2", (gfx, top, left, w, h) -> {
+                int rgb = ColorPresets.get(g.color2);
+                gfx.fill(fieldX + 22, top + (h - 18) / 2, fieldX + 38, top + (h - 18) / 2 + 18, 0xFF000000 | rgb);
+                gfx.drawString(font, ColorPresets.getName(g.color2), fieldX + 65, top + (h - 9) / 2, 0xFFFFFF);
+            }, row2Widgets.toArray(new AbstractWidget[0])));
+        }
+
+        // 「グラデーションを追加」ボタン（上限未満の時だけ表示）。
+        // 新しい段の初期値は、直前の段のcolor2から続くようにしておく（急に無関係な色に飛ばないため）。
+        if (gradients.size() < FireworkEntry.MAX_GRADIENTS) {
+            Button addButton = Button.builder(Component.translatable("gui.realhanabimod.gradient.add"), b -> {
+                ColorGradient last = entry.gradients.get(entry.gradients.size() - 1);
+                entry.gradients.add(new ColorGradient(last.color2, last.color2));
+                rebuild();
+            }).bounds(fieldX, 0, fieldW, fieldH).build();
+            this.list.add(new WidgetRow(null, null, addButton));
+        }
+    }
+
+    /**
+     * グラデーションの追加・削除など、行の数自体が変わる操作の後にスクリーン全体を作り直す。
+     * entryフィールド（と、そこに保持されているgradientsリストの内容）はそのまま維持されるため、
+     * データが失われることなく行だけが正しい数に再構築される。
+     */
+    private void rebuild() {
+        this.init(this.minecraft, this.width, this.height);
     }
 
     private void setFloatSafe(java.util.function.Consumer<Float> setter, String s) {
